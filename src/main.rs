@@ -68,11 +68,20 @@ impl TestState {
     }
 
     fn gen_words(n: usize) -> Vec<TypedWord> {
+        Self::gen_words_after(n, None)
+    }
+
+    fn gen_words_after(n: usize, mut prev: Option<&str>) -> Vec<TypedWord> {
         use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         (0..n)
             .map(|_| {
-                let w = WORDS.choose(&mut rng).unwrap().to_string();
+                let mut w: &str = WORDS.choose(&mut rng).unwrap();
+                while Some(w) == prev {
+                    w = WORDS.choose(&mut rng).unwrap();
+                }
+                prev = Some(w);
+                let w = w.to_string();
                 let states = vec![CharState::Untyped; w.len()];
                 TypedWord {
                     target: w,
@@ -165,8 +174,14 @@ impl TestState {
             return;
         }
         self.current_word += 1;
-        if self.current_word >= self.words.len() {
-            self.words.extend(Self::gen_words(40));
+        // Keep a healthy lookahead buffer past the current word at all times,
+        // instead of only topping up once the buffer is fully exhausted -
+        // otherwise the visible lines ahead of the caret can go blank while
+        // still typing the last buffered word, before the top-up fires.
+        const LOOKAHEAD: usize = 40;
+        if self.words.len() - self.current_word < LOOKAHEAD {
+            let prev = self.words.last().map(|w| w.target.as_str());
+            self.words.extend(Self::gen_words_after(LOOKAHEAD, prev));
         }
     }
 
