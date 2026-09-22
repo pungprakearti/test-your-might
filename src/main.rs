@@ -212,58 +212,167 @@ impl TestState {
     }
 }
 
+#[derive(PartialEq)]
+enum Screen {
+    CharSelect,
+    Typing,
+}
+
+// Character select grid, positions measured (center point, in cs-background.png
+// pixel coordinates) from the portrait cells in that image. The grid is a
+// cross shape: row 0 has 4 portraits (cols 1,2,4,5 - col 3 is the dragon
+// logo and isn't selectable), row 1 has 3 portraits (cols 2,3,4).
+struct CharCell {
+    #[allow(dead_code)]
+    name: &'static str,
+    center: egui::Pos2,
+    row: u8,
+    locked: bool,
+}
+
+const CHAR_CELLS: [CharCell; 7] = [
+    CharCell { name: "Johnny Cage", center: egui::pos2(80.0, 98.5), row: 0, locked: true },
+    CharCell { name: "Kano", center: egui::pos2(149.0, 98.5), row: 0, locked: true },
+    CharCell { name: "Scorpion", center: egui::pos2(282.5, 98.5), row: 0, locked: true },
+    CharCell { name: "Sonya Blade", center: egui::pos2(349.5, 98.5), row: 0, locked: true },
+    CharCell { name: "Raiden", center: egui::pos2(149.0, 181.0), row: 1, locked: true },
+    CharCell { name: "Liu Kang", center: egui::pos2(216.5, 181.0), row: 1, locked: false },
+    CharCell { name: "Sub-Zero", center: egui::pos2(282.5, 181.0), row: 1, locked: true },
+];
+
+const ROW0: [usize; 4] = [0, 1, 2, 3];
+const ROW1: [usize; 3] = [4, 5, 6];
+
+fn row_of(idx: usize) -> &'static [usize] {
+    if CHAR_CELLS[idx].row == 0 { &ROW0 } else { &ROW1 }
+}
+
+fn move_horizontal(idx: usize, delta: i32) -> usize {
+    let row = row_of(idx);
+    let pos = row.iter().position(|&i| i == idx).unwrap() as i32;
+    let len = row.len() as i32;
+    let new_pos = ((pos + delta).rem_euclid(len)) as usize;
+    row[new_pos]
+}
+
+fn move_vertical(idx: usize, target_row: u8) -> usize {
+    if CHAR_CELLS[idx].row == target_row {
+        return idx;
+    }
+    let target: &[usize] = if target_row == 0 { &ROW0 } else { &ROW1 };
+    let cur_x = CHAR_CELLS[idx].center.x;
+    *target
+        .iter()
+        .min_by(|&&a, &&b| {
+            let da = (CHAR_CELLS[a].center.x - cur_x).abs();
+            let db = (CHAR_CELLS[b].center.x - cur_x).abs();
+            da.partial_cmp(&db).unwrap()
+        })
+        .unwrap()
+}
+
+const SELECTOR_ANIM_FRAME_SECS: f64 = 0.25;
+
+struct CharSelectState {
+    selected: usize,
+    confirmed: bool,
+}
+
+impl CharSelectState {
+    fn new() -> Self {
+        Self { selected: 0, confirmed: false }
+    }
+}
+
 struct App {
     bg_texture: Option<egui::TextureHandle>,
+    cs_bg_texture: Option<egui::TextureHandle>,
+    cs_sel1_texture: Option<egui::TextureHandle>,
+    cs_sel2_texture: Option<egui::TextureHandle>,
+    screen: Screen,
+    char_select: CharSelectState,
     test: TestState,
     caret_pos: Option<egui::Pos2>,
 }
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let bg_texture = load_bg_texture(&cc.egui_ctx);
+        let bg_texture = load_texture(&cc.egui_ctx, "cabinet-bg", include_bytes!("../mk-cabinet.png"));
+        let cs_bg_texture = load_texture(&cc.egui_ctx, "cs-bg", include_bytes!("../cs-background.png"));
+        let cs_sel1_texture = load_texture(&cc.egui_ctx, "cs-sel1", include_bytes!("../cs-selected-1.png"));
+        let cs_sel2_texture = load_texture(&cc.egui_ctx, "cs-sel2", include_bytes!("../cs-selected-2.png"));
         Self {
             bg_texture,
+            cs_bg_texture,
+            cs_sel1_texture,
+            cs_sel2_texture,
+            screen: Screen::CharSelect,
+            char_select: CharSelectState::new(),
             test: TestState::new(),
             caret_pos: None,
         }
     }
 }
 
-fn load_bg_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
-    let bytes = include_bytes!("../mk-cabinet.png");
+fn load_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::TextureHandle> {
     let img = image::load_from_memory(bytes).ok()?.to_rgba8();
     let (w, h) = img.dimensions();
     let pixels = img.into_raw();
     let color_image = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &pixels);
-    Some(ctx.load_texture("cabinet-bg", color_image, egui::TextureOptions::LINEAR))
+    Some(ctx.load_texture(name, color_image, egui::TextureOptions::LINEAR))
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.test.tick();
-        if !self.test.finished {
-            ctx.input(|i| {
-                for ev in &i.events {
-                    match ev {
-                        egui::Event::Text(t) => {
-                            for c in t.chars() {
-                                self.test.on_char(c);
-                            }
-                        }
-                        egui::Event::Key {
-                            key: egui::Key::Backspace,
-                            pressed: true,
-                            ..
-                        } => self.test.on_backspace(),
-                        _ => {}
+        if self.screen == Screen::CharSelect {
+            if !self.char_select.confirmed {
+                ctx.input(|i| {
+                    if i.key_pressed(egui::Key::ArrowLeft) {
+                        self.char_select.selected = move_horizontal(self.char_select.selected, -1);
                     }
+                    if i.key_pressed(egui::Key::ArrowRight) {
+                        self.char_select.selected = move_horizontal(self.char_select.selected, 1);
+                    }
+                    if i.key_pressed(egui::Key::ArrowUp) {
+                        self.char_select.selected = move_vertical(self.char_select.selected, 0);
+                    }
+                    if i.key_pressed(egui::Key::ArrowDown) {
+                        self.char_select.selected = move_vertical(self.char_select.selected, 1);
+                    }
+                    if i.key_pressed(egui::Key::Enter)
+                        && !CHAR_CELLS[self.char_select.selected].locked
+                    {
+                        self.char_select.confirmed = true;
+                    }
+                });
+            }
+        }
+        if self.screen == Screen::Typing {
+            self.test.tick();
+            if !self.test.finished {
+                ctx.input(|i| {
+                    for ev in &i.events {
+                        match ev {
+                            egui::Event::Text(t) => {
+                                for c in t.chars() {
+                                    self.test.on_char(c);
+                                }
+                            }
+                            egui::Event::Key {
+                                key: egui::Key::Backspace,
+                                pressed: true,
+                                ..
+                            } => self.test.on_backspace(),
+                            _ => {}
+                        }
+                    }
+                });
+            } else {
+                let restart = ctx.input(|i| i.key_pressed(egui::Key::R));
+                if restart {
+                    self.test = TestState::new();
+                    self.caret_pos = None;
                 }
-            });
-        } else {
-            let restart = ctx.input(|i| i.key_pressed(egui::Key::R));
-            if restart {
-                self.test = TestState::new();
-                self.caret_pos = None;
             }
         }
         ctx.request_repaint_after(Duration::from_millis(100));
@@ -284,8 +393,43 @@ impl eframe::App for App {
                 let screen_rect = egui::Rect::from_min_max(SCREEN_MIN, SCREEN_MAX);
                 let mut screen_ui = ui.new_child(egui::UiBuilder::new().max_rect(screen_rect));
                 screen_ui.set_clip_rect(screen_rect);
-                let dt = ctx.input(|i| i.stable_dt);
-                draw_screen(&mut screen_ui, &self.test, screen_rect, &mut self.caret_pos, dt);
+                match self.screen {
+                    Screen::CharSelect => {
+                        if let Some(tex) = &self.cs_bg_texture {
+                            screen_ui.painter().image(
+                                tex.id(),
+                                screen_rect,
+                                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                        }
+                        let cell = &CHAR_CELLS[self.char_select.selected];
+                        let time = ctx.input(|i| i.time);
+                        let use_frame1 = self.char_select.confirmed
+                            || (time / SELECTOR_ANIM_FRAME_SECS) as u64 % 2 == 0;
+                        let sel_tex = if use_frame1 {
+                            &self.cs_sel1_texture
+                        } else {
+                            &self.cs_sel2_texture
+                        };
+                        if let Some(tex) = sel_tex {
+                            let sel_rect = egui::Rect::from_center_size(
+                                screen_rect.min + cell.center.to_vec2(),
+                                egui::vec2(67.0, 82.0),
+                            );
+                            screen_ui.painter().image(
+                                tex.id(),
+                                sel_rect,
+                                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                        }
+                    }
+                    Screen::Typing => {
+                        let dt = ctx.input(|i| i.stable_dt);
+                        draw_screen(&mut screen_ui, &self.test, screen_rect, &mut self.caret_pos, dt);
+                    }
+                }
 
                 let close_rect = egui::Rect::from_min_size(
                     egui::pos2(WINDOW_W - 30.0, 6.0),

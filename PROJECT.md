@@ -23,14 +23,22 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   back into the previous one (repeatable).
 - Typed letters ease/fade into place (`animate_value_with_time`) rather than
   snapping in.
+- App now opens on a character select screen (`cs-background.png` drawn over
+  the cabinet screen rect) instead of straight into the typing test. A
+  green-frame selector (`cs-selected-1.png`/`cs-selected-2.png`) blinks every
+  250ms and is moved with arrow keys across the 7-portrait cross-shaped grid
+  (`CHAR_CELLS` in `src/main.rs`); Enter only confirms on an unlocked
+  character (currently just Liu Kang).
 
 ## Not yet built
 
 - Three-test average + wood/stone/iron/ruby/diamond tier thresholds.
-- Character select screen and per-character unlock conditions (including the
-  10-non-consecutive-days-played tracker for Scorpion).
+- Per-character unlock conditions (including the 10-non-consecutive-days-played
+  tracker for Scorpion) - only Liu Kang is selectable today, everyone else is
+  hardcoded `locked: true` in `CHAR_CELLS`.
+- What happens after confirming a character select (currently just freezes the
+  selector animation; doesn't transition to the typing test yet).
 - Local persistence of test history (times, wpm, accuracy).
-- Sprites (user is providing these separately).
 - Windows build/packaging (developed so far on WSL/Linux; need a cross-build
   or native Windows build pass before shipping the floating always-on-top
   window on actual Windows).
