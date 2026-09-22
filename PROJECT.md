@@ -38,3 +38,8 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
 ## Open questions
 
 - None blocking right now; typing test core is working and approved.
+
+## More detail
+
+- Stack + how to run: `README.md`
+- Dev environment / toolchain quirks (WSL, PATH): `docs/dev-environment.md`
