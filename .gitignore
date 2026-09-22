@@ -1,1 +1,9 @@
 /target
+
+# AI/agent tooling - never tracked
+.claude/
+CLAUDE.md
+.cursor/
+.cursorrules
+.github/copilot-instructions.md
+.aider*
