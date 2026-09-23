@@ -218,6 +218,37 @@ enum Screen {
     Typing,
 }
 
+// WPM tiers a character can unlock at, as a fraction of the player's average
+// WPM across their first 3 30s tests (25/50/75/100/105%). Averaging + tier
+// evaluation isn't built yet (see PROJECT.md "Not yet built"), so for now
+// these are just flags describing each character's unlock rule.
+#[derive(Clone, Copy)]
+enum WpmTier {
+    Wood,
+    Stone,
+    Iron,
+    Ruby,
+    Diamond,
+}
+
+// The rule that unlocks a character. `is_unlocked` below is a placeholder
+// until WPM-tier averaging and played-day tracking exist to evaluate these
+// for real - today only `Default` characters are actually unlocked.
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+enum UnlockCondition {
+    Default,
+    WpmTier(WpmTier),
+    PlayedDays(u32),
+}
+
+fn is_unlocked(cond: UnlockCondition) -> bool {
+    match cond {
+        UnlockCondition::Default => true,
+        UnlockCondition::WpmTier(_) | UnlockCondition::PlayedDays(_) => false,
+    }
+}
+
 // Character select grid, positions measured (center point, in cs-background.png
 // pixel coordinates) from the portrait cells in that image. The grid is a
 // cross shape: row 0 has 4 portraits (cols 1,2,4,5 - col 3 is the dragon
@@ -227,17 +258,23 @@ struct CharCell {
     name: &'static str,
     center: egui::Pos2,
     row: u8,
-    locked: bool,
+    unlock: UnlockCondition,
+}
+
+impl CharCell {
+    fn locked(&self) -> bool {
+        !is_unlocked(self.unlock)
+    }
 }
 
 const CHAR_CELLS: [CharCell; 7] = [
-    CharCell { name: "Johnny Cage", center: egui::pos2(80.0, 98.5), row: 0, locked: true },
-    CharCell { name: "Kano", center: egui::pos2(149.0, 98.5), row: 0, locked: true },
-    CharCell { name: "Scorpion", center: egui::pos2(282.5, 98.5), row: 0, locked: true },
-    CharCell { name: "Sonya Blade", center: egui::pos2(349.5, 98.5), row: 0, locked: true },
-    CharCell { name: "Raiden", center: egui::pos2(149.0, 181.0), row: 1, locked: true },
-    CharCell { name: "Liu Kang", center: egui::pos2(216.5, 181.0), row: 1, locked: false },
-    CharCell { name: "Sub-Zero", center: egui::pos2(282.5, 181.0), row: 1, locked: true },
+    CharCell { name: "Johnny Cage", center: egui::pos2(80.0, 98.5), row: 0, unlock: UnlockCondition::WpmTier(WpmTier::Wood) },
+    CharCell { name: "Kano", center: egui::pos2(149.0, 98.5), row: 0, unlock: UnlockCondition::WpmTier(WpmTier::Stone) },
+    CharCell { name: "Scorpion", center: egui::pos2(282.5, 98.5), row: 0, unlock: UnlockCondition::PlayedDays(10) },
+    CharCell { name: "Sonya Blade", center: egui::pos2(349.5, 98.5), row: 0, unlock: UnlockCondition::WpmTier(WpmTier::Ruby) },
+    CharCell { name: "Raiden", center: egui::pos2(149.0, 181.0), row: 1, unlock: UnlockCondition::WpmTier(WpmTier::Iron) },
+    CharCell { name: "Liu Kang", center: egui::pos2(216.5, 181.0), row: 1, unlock: UnlockCondition::Default },
+    CharCell { name: "Sub-Zero", center: egui::pos2(282.5, 181.0), row: 1, unlock: UnlockCondition::WpmTier(WpmTier::Diamond) },
 ];
 
 const ROW0: [usize; 4] = [0, 1, 2, 3];
@@ -289,6 +326,9 @@ struct App {
     cs_bg_texture: Option<egui::TextureHandle>,
     cs_sel1_texture: Option<egui::TextureHandle>,
     cs_sel2_texture: Option<egui::TextureHandle>,
+    // Per-CHAR_CELLS-index unlocked-portrait overlay (cs-<name>.png). Liu
+    // Kang has no entry (his portrait is already baked into cs-background.png).
+    cs_portrait_textures: [Option<egui::TextureHandle>; 7],
     screen: Screen,
     char_select: CharSelectState,
     test: TestState,
@@ -297,15 +337,27 @@ struct App {
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let bg_texture = load_texture(&cc.egui_ctx, "cabinet-bg", include_bytes!("../mk-cabinet.png"));
-        let cs_bg_texture = load_texture(&cc.egui_ctx, "cs-bg", include_bytes!("../cs-background.png"));
-        let cs_sel1_texture = load_texture(&cc.egui_ctx, "cs-sel1", include_bytes!("../cs-selected-1.png"));
-        let cs_sel2_texture = load_texture(&cc.egui_ctx, "cs-sel2", include_bytes!("../cs-selected-2.png"));
+        let bg_texture = load_texture(&cc.egui_ctx, "cabinet-bg", include_bytes!("../assets/mk-cabinet.png"));
+        let cs_bg_texture = load_texture(&cc.egui_ctx, "cs-bg", include_bytes!("../assets/cs-background.png"));
+        let cs_sel1_texture = load_texture(&cc.egui_ctx, "cs-sel1", include_bytes!("../assets/cs-selected-1.png"));
+        let cs_sel2_texture = load_texture(&cc.egui_ctx, "cs-sel2", include_bytes!("../assets/cs-selected-2.png"));
+        // Indices match CHAR_CELLS: Johnny Cage, Kano, Scorpion, Sonya Blade,
+        // Raiden, Liu Kang (none), Sub-Zero.
+        let cs_portrait_textures = [
+            load_texture(&cc.egui_ctx, "cs-johnnycage", include_bytes!("../assets/cs-johnnycage.png")),
+            load_texture(&cc.egui_ctx, "cs-kano", include_bytes!("../assets/cs-kano.png")),
+            load_texture(&cc.egui_ctx, "cs-scorpion", include_bytes!("../assets/cs-scorpion.png")),
+            load_texture(&cc.egui_ctx, "cs-sonyablade", include_bytes!("../assets/cs-sonyablade.png")),
+            load_texture(&cc.egui_ctx, "cs-raiden", include_bytes!("../assets/cs-raiden.png")),
+            None,
+            load_texture(&cc.egui_ctx, "cs-subzero", include_bytes!("../assets/cs-subzero.png")),
+        ];
         Self {
             bg_texture,
             cs_bg_texture,
             cs_sel1_texture,
             cs_sel2_texture,
+            cs_portrait_textures,
             screen: Screen::CharSelect,
             char_select: CharSelectState::new(),
             test: TestState::new(),
@@ -340,7 +392,7 @@ impl eframe::App for App {
                         self.char_select.selected = move_vertical(self.char_select.selected, 1);
                     }
                     if i.key_pressed(egui::Key::Enter)
-                        && !CHAR_CELLS[self.char_select.selected].locked
+                        && !CHAR_CELLS[self.char_select.selected].locked()
                     {
                         self.char_select.confirmed = true;
                     }
@@ -402,6 +454,23 @@ impl eframe::App for App {
                                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                                 egui::Color32::WHITE,
                             );
+                        }
+                        for (i, cell) in CHAR_CELLS.iter().enumerate() {
+                            if cell.locked() {
+                                continue;
+                            }
+                            if let Some(tex) = &self.cs_portrait_textures[i] {
+                                let portrait_rect = egui::Rect::from_center_size(
+                                    screen_rect.min + cell.center.to_vec2(),
+                                    egui::vec2(59.0, 74.0),
+                                );
+                                screen_ui.painter().image(
+                                    tex.id(),
+                                    portrait_rect,
+                                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                    egui::Color32::WHITE,
+                                );
+                            }
                         }
                         let cell = &CHAR_CELLS[self.char_select.selected];
                         let time = ctx.input(|i| i.time);

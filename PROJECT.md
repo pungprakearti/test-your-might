@@ -7,7 +7,10 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
 
 ## Key facts
 
-- Window is fixed at 500x700 to match `mk-cabinet.png`.
+- All image assets live under `assets/` (cabinet/character-select art, plus
+  unwired character sprite frames and tym-* UI pieces the user has added but
+  not yet hooked up).
+- Window is fixed at 500x700 to match `assets/mk-cabinet.png`.
 - The typing test only renders inside the cabinet's "screen" rect:
   `(32, 151)` to `(467, 441)` (measured from the PNG, see git history of
   `src/main.rs` for the flood-fill measurement approach).
@@ -29,15 +32,24 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   250ms and is moved with arrow keys across the 7-portrait cross-shaped grid
   (`CHAR_CELLS` in `src/main.rs`); Enter only confirms on an unlocked
   character (currently just Liu Kang).
+- Each `CHAR_CELLS` entry carries an `UnlockCondition` flag (`Default`,
+  `WpmTier(Wood/Stone/Iron/Ruby/Diamond)`, or `PlayedDays(10)`) mapped
+  alphabetically: Wood=Johnny Cage, Stone=Kano, Iron=Raiden, Ruby=Sonya Blade,
+  Diamond=Sub-Zero, PlayedDays(10)=Scorpion, Default=Liu Kang. `is_unlocked`
+  is still a placeholder that only returns true for `Default`, since the tier
+  averaging and day-tracking to evaluate the others for real isn't built.
+  When a character *is* unlocked, its `cs-<name>.png` portrait is drawn over
+  its cell in addition to becoming selectable.
 
 ## Not yet built
 
-- Three-test average + wood/stone/iron/ruby/diamond tier thresholds.
-- Per-character unlock conditions (including the 10-non-consecutive-days-played
-  tracker for Scorpion) - only Liu Kang is selectable today, everyone else is
-  hardcoded `locked: true` in `CHAR_CELLS`.
+- Three-test average + wood/stone/iron/ruby/diamond tier thresholds, and
+  wiring `is_unlocked` up to them plus a played-days tracker for Scorpion.
 - What happens after confirming a character select (currently just freezes the
   selector animation; doesn't transition to the typing test yet).
+- Hooking up the newly-added `assets/<character>_frame0N.png` sprite frames,
+  `assets/*_placement.png` reference art, and `assets/tym-*.png` UI pieces -
+  all present in `assets/` but not yet referenced from code.
 - Local persistence of test history (times, wpm, accuracy).
 - Windows build/packaging (developed so far on WSL/Linux; need a cross-build
   or native Windows build pass before shipping the floating always-on-top
