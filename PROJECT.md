@@ -26,11 +26,14 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   back into the previous one (repeatable).
 - Typed letters ease/fade into place (`animate_value_with_time`) rather than
   snapping in.
+- Code layout: `src/main.rs` holds the window/cabinet shell and screen
+  routing; each screen lives in its own module (`char_select.rs`,
+  `test_your_might.rs`, `typing_test.rs`) with `handle_input`/`draw`.
 - App now opens on a character select screen (`cs-background.png` drawn over
   the cabinet screen rect) instead of straight into the typing test. A
   green-frame selector (`cs-selected-1.png`/`cs-selected-2.png`) blinks every
   250ms and is moved with arrow keys across the 7-portrait cross-shaped grid
-  (`CHAR_CELLS` in `src/main.rs`); Enter only confirms on an unlocked
+  (`CHAR_CELLS` in `src/char_select.rs`); Enter only confirms on an unlocked
   character (currently just Liu Kang).
 - Each `CHAR_CELLS` entry carries an `UnlockCondition` flag (`Default`,
   `WpmTier(Wood/Stone/Iron/Ruby/Diamond)`, or `PlayedDays(10)`) mapped
@@ -45,8 +48,10 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
 
 - Three-test average + wood/stone/iron/ruby/diamond tier thresholds, and
   wiring `is_unlocked` up to them plus a played-days tracker for Scorpion.
-- What happens after confirming a character select (currently just freezes the
-  selector animation; doesn't transition to the typing test yet).
+- The Test Your Might screen beyond its backdrop: confirming a character now
+  transitions to it (`src/test_your_might.rs`, `tym-bg.png`, with P1/P2 foot
+  anchors defined), but no fighters/slab/gameplay are drawn yet, and nothing
+  leads from it into the typing test.
 - Hooking up the newly-added `assets/<character>_frame0N.png` sprite frames,
   `assets/*_placement.png` reference art, and `assets/tym-*.png` UI pieces -
   all present in `assets/` but not yet referenced from code.
