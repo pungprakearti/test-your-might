@@ -6,6 +6,8 @@
 //
 //   TYM_DEV_START=<sprite prefix>  skip character select and start a match
 //                                   as that character (e.g. liu_kang)
+//   TYM_DEV_SELECT=<sprite prefix> put the character select cursor on that
+//                                   fighter at startup
 //   TYM_DEV_TYPE=<text>            feed this text to the typing test at start
 //   TYM_DEV_TYPE_WORDS=<n>         correctly type the test's first n words at
 //                                   start
@@ -23,6 +25,11 @@ pub fn start_character() -> Option<Character> {
         eprintln!("TYM_DEV_START: unknown character {name:?}");
     }
     found
+}
+
+pub fn select_character() -> Option<Character> {
+    let name = std::env::var("TYM_DEV_SELECT").ok()?;
+    Character::ALL.into_iter().find(|c| c.sprite_prefix() == name)
 }
 
 pub fn typed_text() -> Option<String> {

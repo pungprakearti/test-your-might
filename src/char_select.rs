@@ -1,42 +1,13 @@
 // Character select screen: the 7-portrait cross-shaped grid drawn over
 // cs-background.png, navigated with arrow keys, with a blinking green
-// selector and per-character unlock flags.
+// selector. Locked fighters (see `Character::unlock`) can't be picked; a line
+// under the grid says who's highlighted and how to unlock them.
 
 use eframe::egui;
 
-use crate::fighter::Character;
+use crate::fighter::{Character, Unlock};
 use crate::load_texture;
-
-// WPM tiers a character can unlock at, as a fraction of the player's average
-// WPM across their first 3 30s tests (25/50/75/100/105%). Averaging + tier
-// evaluation isn't built yet (see PROJECT.md "Not yet built"), so for now
-// these are just flags describing each character's unlock rule.
-#[derive(Clone, Copy)]
-pub enum WpmTier {
-    Wood,
-    Stone,
-    Iron,
-    Ruby,
-    Diamond,
-}
-
-// The rule that unlocks a character. `is_unlocked` below is a placeholder
-// until WPM-tier averaging and played-day tracking exist to evaluate these
-// for real - today only `Default` characters are actually unlocked.
-#[derive(Clone, Copy)]
-#[allow(dead_code)]
-pub enum UnlockCondition {
-    Default,
-    WpmTier(WpmTier),
-    PlayedDays(u32),
-}
-
-fn is_unlocked(cond: UnlockCondition) -> bool {
-    match cond {
-        UnlockCondition::Default => true,
-        UnlockCondition::WpmTier(_) | UnlockCondition::PlayedDays(_) => false,
-    }
-}
+use crate::progress::Progress;
 
 // Character select grid, positions measured (center point, in cs-background.png
 // pixel coordinates) from the portrait cells in that image. The grid is a
@@ -46,23 +17,16 @@ struct CharCell {
     character: Character,
     center: egui::Pos2,
     row: u8,
-    unlock: UnlockCondition,
-}
-
-impl CharCell {
-    fn locked(&self) -> bool {
-        !is_unlocked(self.unlock)
-    }
 }
 
 const CHAR_CELLS: [CharCell; 7] = [
-    CharCell { character: Character::JohnnyCage, center: egui::pos2(80.0, 98.5), row: 0, unlock: UnlockCondition::WpmTier(WpmTier::Wood) },
-    CharCell { character: Character::Kano, center: egui::pos2(149.0, 98.5), row: 0, unlock: UnlockCondition::WpmTier(WpmTier::Stone) },
-    CharCell { character: Character::Scorpion, center: egui::pos2(282.5, 98.5), row: 0, unlock: UnlockCondition::PlayedDays(10) },
-    CharCell { character: Character::SonyaBlade, center: egui::pos2(349.5, 98.5), row: 0, unlock: UnlockCondition::WpmTier(WpmTier::Ruby) },
-    CharCell { character: Character::Raiden, center: egui::pos2(149.0, 181.0), row: 1, unlock: UnlockCondition::WpmTier(WpmTier::Iron) },
-    CharCell { character: Character::LiuKang, center: egui::pos2(216.5, 181.0), row: 1, unlock: UnlockCondition::Default },
-    CharCell { character: Character::SubZero, center: egui::pos2(282.5, 181.0), row: 1, unlock: UnlockCondition::WpmTier(WpmTier::Diamond) },
+    CharCell { character: Character::JohnnyCage, center: egui::pos2(80.0, 98.5), row: 0 },
+    CharCell { character: Character::Kano, center: egui::pos2(149.0, 98.5), row: 0 },
+    CharCell { character: Character::SubZero, center: egui::pos2(282.5, 98.5), row: 0 },
+    CharCell { character: Character::SonyaBlade, center: egui::pos2(349.5, 98.5), row: 0 },
+    CharCell { character: Character::Raiden, center: egui::pos2(149.0, 181.0), row: 1 },
+    CharCell { character: Character::LiuKang, center: egui::pos2(216.5, 181.0), row: 1 },
+    CharCell { character: Character::Scorpion, center: egui::pos2(282.5, 181.0), row: 1 },
 ];
 
 const ROW0: [usize; 4] = [0, 1, 2, 3];
@@ -98,6 +62,16 @@ fn move_vertical(idx: usize, target_row: u8) -> usize {
 
 const SELECTOR_ANIM_FRAME_SECS: f64 = 0.25;
 
+// The line under the grid naming the highlighted fighter and how to unlock
+// them: centered in the plain stone below the grid frame (which ends at
+// y=236 in cs-background.png), on a dark pill for readability.
+const HINT_CENTER: egui::Pos2 = egui::pos2(218.0, 264.0);
+const HINT_FONT: f32 = 13.0;
+const HINT_PAD: egui::Vec2 = egui::vec2(10.0, 4.0);
+const HINT_BACKDROP_ALPHA: u8 = 170;
+const HINT_READY: egui::Color32 = egui::Color32::from_rgb(120, 220, 140);
+const HINT_LOCKED: egui::Color32 = egui::Color32::from_gray(200);
+
 pub struct CharSelectScreen {
     cs_bg_texture: Option<egui::TextureHandle>,
     cs_sel1_texture: Option<egui::TextureHandle>,
@@ -105,40 +79,77 @@ pub struct CharSelectScreen {
     // Per-CHAR_CELLS-index unlocked-portrait overlay (cs-<name>.png). Liu
     // Kang has no entry (his portrait is already baked into cs-background.png).
     cs_portrait_textures: [Option<egui::TextureHandle>; 7],
+    // Per-CHAR_CELLS-index unlock state, and the days played (for
+    // Scorpion's hint), refreshed from saved progress.
+    unlocked: [bool; 7],
+    days_played: usize,
     selected: usize,
     pub confirmed: bool,
 }
 
 impl CharSelectScreen {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, progress: &Progress) -> Self {
         let cs_bg_texture = load_texture(&cc.egui_ctx, "cs-bg", include_bytes!("../assets/cs-background.png"));
         let cs_sel1_texture = load_texture(&cc.egui_ctx, "cs-sel1", include_bytes!("../assets/cs-selected-1.png"));
         let cs_sel2_texture = load_texture(&cc.egui_ctx, "cs-sel2", include_bytes!("../assets/cs-selected-2.png"));
-        // Indices match CHAR_CELLS: Johnny Cage, Kano, Scorpion, Sonya Blade,
-        // Raiden, Liu Kang (none), Sub-Zero.
+        // Indices match CHAR_CELLS: Johnny Cage, Kano, Sub-Zero, Sonya Blade,
+        // Raiden, Liu Kang (none), Scorpion.
         let cs_portrait_textures = [
             load_texture(&cc.egui_ctx, "cs-johnnycage", include_bytes!("../assets/cs-johnnycage.png")),
             load_texture(&cc.egui_ctx, "cs-kano", include_bytes!("../assets/cs-kano.png")),
-            load_texture(&cc.egui_ctx, "cs-scorpion", include_bytes!("../assets/cs-scorpion.png")),
+            load_texture(&cc.egui_ctx, "cs-subzero", include_bytes!("../assets/cs-subzero.png")),
             load_texture(&cc.egui_ctx, "cs-sonyablade", include_bytes!("../assets/cs-sonyablade.png")),
             load_texture(&cc.egui_ctx, "cs-raiden", include_bytes!("../assets/cs-raiden.png")),
             None,
-            load_texture(&cc.egui_ctx, "cs-subzero", include_bytes!("../assets/cs-subzero.png")),
+            load_texture(&cc.egui_ctx, "cs-scorpion", include_bytes!("../assets/cs-scorpion.png")),
         ];
-        Self {
+        let mut screen = Self {
             cs_bg_texture,
             cs_sel1_texture,
             cs_sel2_texture,
             cs_portrait_textures,
-            // Start on a fighter that can actually be picked.
-            selected: CHAR_CELLS.iter().position(|c| !c.locked()).unwrap_or(0),
+            unlocked: [false; 7],
+            days_played: 0,
+            selected: 0,
             confirmed: false,
-        }
+        };
+        screen.refresh_unlocks(progress);
+        // Start on a fighter that can actually be picked.
+        screen.selected = (0..CHAR_CELLS.len()).find(|&i| screen.unlocked[i]).unwrap_or(0);
+        screen
     }
 
-    // Back from a match: pick again, starting from the last choice.
-    pub fn reopen(&mut self) {
+    // Back from a match: pick again, starting from the last choice, with
+    // anything unlocked since then now available.
+    pub fn reopen(&mut self, progress: &Progress) {
         self.confirmed = false;
+        self.refresh_unlocks(progress);
+    }
+
+    fn refresh_unlocks(&mut self, progress: &Progress) {
+        self.unlocked = std::array::from_fn(|i| progress.is_unlocked(CHAR_CELLS[i].character));
+        self.days_played = progress.days_played();
+    }
+
+    fn hint(&self) -> (String, egui::Color32) {
+        let character = CHAR_CELLS[self.selected].character;
+        let name = character.name();
+        if self.unlocked[self.selected] {
+            return (format!("{name}  -  ENTER to fight"), HINT_READY);
+        }
+        let how = match character.unlock() {
+            Unlock::Default => unreachable!("default fighters are always unlocked"),
+            Unlock::Break(material) => format!("break {} to unlock", material.label()),
+            Unlock::PlayedDays(days) => format!("play {days} different days ({}/{days})", self.days_played.min(days)),
+        };
+        (format!("{name}  -  {how}"), HINT_LOCKED)
+    }
+
+    // Moves the cursor onto `character` (dev hook).
+    pub fn dev_select(&mut self, character: Character) {
+        if let Some(i) = CHAR_CELLS.iter().position(|c| c.character == character) {
+            self.selected = i;
+        }
     }
 
     pub fn selected_character(&self) -> Character {
@@ -162,7 +173,7 @@ impl CharSelectScreen {
             if i.key_pressed(egui::Key::ArrowDown) {
                 self.selected = move_vertical(self.selected, 1);
             }
-            if i.key_pressed(egui::Key::Enter) && !CHAR_CELLS[self.selected].locked() {
+            if i.key_pressed(egui::Key::Enter) && self.unlocked[self.selected] {
                 self.confirmed = true;
             }
         });
@@ -178,7 +189,7 @@ impl CharSelectScreen {
             );
         }
         for (i, cell) in CHAR_CELLS.iter().enumerate() {
-            if cell.locked() {
+            if !self.unlocked[i] {
                 continue;
             }
             if let Some(tex) = &self.cs_portrait_textures[i] {
@@ -210,5 +221,12 @@ impl CharSelectScreen {
                 egui::Color32::WHITE,
             );
         }
+
+        let (text, color) = self.hint();
+        let painter = ui.painter();
+        let galley = painter.layout_no_wrap(text, egui::FontId::monospace(HINT_FONT), color);
+        let pill = egui::Rect::from_center_size(screen_rect.min + HINT_CENTER.to_vec2(), galley.size() + HINT_PAD * 2.0);
+        painter.rect_filled(pill, 4.0, egui::Color32::from_black_alpha(HINT_BACKDROP_ALPHA));
+        painter.galley(pill.min + HINT_PAD, galley, color);
     }
 }

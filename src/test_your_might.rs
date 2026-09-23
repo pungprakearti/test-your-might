@@ -98,6 +98,8 @@ struct Round {
     cpu: CpuRun,
     // Set once the test finishes and the run has been recorded.
     result: Option<Run>,
+    // Fighters this round's result unlocked, for the results panel.
+    new_unlocks: Vec<Character>,
     // egui time the timer ran out, which starts the strike sequence.
     ended_at: Option<f64>,
 }
@@ -191,8 +193,12 @@ impl TestYourMightScreen {
         }
         self.typing.handle_input(ctx);
         if self.typing.finished() && self.round.result.is_none() {
+            let locked_before: Vec<Character> =
+                Character::ALL.into_iter().filter(|&c| !self.progress.is_unlocked(c)).collect();
             let run = self.progress.record(self.typing.wpm(), self.typing.accuracy(), self.round.target_wpm);
             self.progress.save();
+            self.round.new_unlocks = locked_before.into_iter().filter(|&c| self.progress.is_unlocked(c)).collect();
+            self.round.cpu.resolve_diamond(run.passed);
             self.round.result = Some(run);
             self.round.ended_at = Some(now);
         } else if self.round.result.is_some()
@@ -216,6 +222,10 @@ impl TestYourMightScreen {
         let ended_at = self.round.ended_at?;
         let p1_passed = self.round.result.as_ref().is_some_and(|r| r.passed);
         Some([ending_at(ended_at, p1_passed, now), ending_at(ended_at, self.round.cpu.passes(), now)])
+    }
+
+    pub fn progress(&self) -> &Progress {
+        &self.progress
     }
 
     pub fn dev_type(&mut self, text: &str) {
@@ -248,15 +258,21 @@ impl TestYourMightScreen {
         };
         let stats = format!("WPM {:.0}   ACC {:.0}%", run.wpm, run.accuracy);
         let goal = format!("goal {:.0}", run.target_wpm);
-        let (verdict, verdict_color) = if run.passed {
+        let (mut verdict, verdict_color) = if run.passed {
             (format!("{material} BROKEN!"), RESULT_GOLD)
         } else {
             (format!("TOO SLOW - {material} HELD"), RESULT_BAD)
         };
+        if !self.round.new_unlocks.is_empty() {
+            let names: Vec<&str> = self.round.new_unlocks.iter().map(|c| c.name()).collect();
+            verdict += &format!("  {} UNLOCKED!", names.join(" + "));
+        }
         // Progress has already recorded this run, so it holds the next round.
         let next_material = self.progress.material.label();
         let next_goal = self.progress.target_wpm();
-        let next = if self.progress.material == self.round.material {
+        let next = if !run.passed && self.round.material != Material::Wood {
+            format!("Back to {next_material}, goal {next_goal:.0}")
+        } else if self.progress.material == self.round.material {
             format!("Next: {next_material} again, goal {next_goal:.0}")
         } else {
             format!("Next: {next_material}, goal {next_goal:.0}")
@@ -337,7 +353,7 @@ impl TestYourMightScreen {
 impl Round {
     fn new(progress: &Progress) -> Self {
         let material = progress.material;
-        Round { material, target_wpm: progress.target_wpm(), cpu: CpuRun::new(material), result: None, ended_at: None }
+        Round { material, target_wpm: progress.target_wpm(), cpu: CpuRun::new(material), result: None, new_unlocks: Vec::new(), ended_at: None }
     }
 }
 
@@ -352,14 +368,17 @@ fn fill_fraction(ratio: f64, bar: f32) -> f32 {
 // under the red bar the whole test, dips under it a few seconds before the
 // end, and climbs back over just before time runs out - so it always looks
 // like it almost lost. Harder materials swing wider and finish closer to the
-// bar. Diamond is the exception: it rises to just under the bar again and
-// again but never gets over it.
+// bar. Below diamond the CPU always wins. On diamond the CPU's result is the
+// opposite of the player's, which isn't known until the buzzer: it settles
+// exactly on the bar, then `resolve_diamond` tips it just over (player lost)
+// or just under (player won), and the eased gauge shows that as the strike
+// lands.
 struct CpuRun {
-    // Midpoint of the swing, as a multiple of the target (1.0 = the bar).
-    center: f64,
-    // Swing size either side of `center`.
+    material: Material,
+    // Swing size either side of the bar.
     amplitude: f64,
-    // Where it lands at the end of the test.
+    // Where it lands at the end of the test. On diamond this is exactly the
+    // bar (1.0) until `resolve_diamond` is called.
     final_ratio: f64,
     swing_hz: f64,
     // Chosen so the swing bottoms out exactly at CPU_DIP_SECS.
@@ -372,38 +391,50 @@ const CPU_RAMP_SECS: f64 = 3.0;
 // final value by the end of the test.
 const CPU_DIP_SECS: f64 = 27.0;
 const TEST_SECS: f64 = 30.0;
-// On diamond, how close under the bar the swing peaks get.
-const DIAMOND_PEAK: f64 = 0.97;
+// On diamond, how far past the bar (either way) the CPU finishes.
+const DIAMOND_MARGIN: std::ops::Range<f64> = 0.03..0.06;
 
 impl CpuRun {
     fn new(material: Material) -> Self {
         use rand::Rng;
         let mut rng = rand::thread_rng();
-        // (swing amplitude, final ratio range) - wider swings and thinner
-        // winning margins as the materials get harder.
-        let (amplitude, finish) = match material {
-            Material::Wood => (0.15, 1.10..1.18),
-            Material::Stone => (0.18, 1.07..1.12),
-            Material::Steel => (0.22, 1.05..1.09),
-            Material::Ruby => (0.26, 1.03..1.06),
-            Material::Diamond => (0.20, 0.93..0.96),
+        // (swing amplitude, winning finish range) - wider swings and thinner
+        // winning margins as the materials get harder. Diamond's finish is
+        // decided later by the player's result.
+        let (amplitude, final_ratio) = match material {
+            Material::Wood => (0.15, rng.gen_range(1.10..1.18)),
+            Material::Stone => (0.18, rng.gen_range(1.07..1.12)),
+            Material::Steel => (0.22, rng.gen_range(1.05..1.09)),
+            Material::Ruby => (0.26, rng.gen_range(1.03..1.06)),
+            Material::Diamond => (0.30, 1.0),
         };
-        let center = if material == Material::Diamond { DIAMOND_PEAK - amplitude } else { 1.0 };
         let swing_hz = rng.gen_range(0.18..0.28);
         let swing_phase = -std::f64::consts::FRAC_PI_2 - std::f64::consts::TAU * swing_hz * CPU_DIP_SECS;
-        CpuRun { center, amplitude, final_ratio: rng.gen_range(finish), swing_hz, swing_phase }
+        CpuRun { material, amplitude, final_ratio, swing_hz, swing_phase }
     }
 
-    // Whether the CPU's final speed clears the bar (breaks its slab).
+    // On diamond, sets the CPU's finish to the opposite of the player's
+    // result. No-op on other materials, where the CPU always wins.
+    fn resolve_diamond(&mut self, player_passed: bool) {
+        use rand::Rng;
+        if self.material != Material::Diamond {
+            return;
+        }
+        let margin = rand::thread_rng().gen_range(DIAMOND_MARGIN);
+        self.final_ratio = if player_passed { 1.0 - margin } else { 1.0 + margin };
+    }
+
+    // Whether the CPU's final speed clears the bar (breaks its slab). Only
+    // meaningful once the round is over (and, on diamond, resolved).
     fn passes(&self) -> bool {
-        self.final_ratio >= 1.0
+        self.final_ratio > 1.0
     }
 
     // Speed as a multiple of the target, `t` seconds into the test.
     fn ratio_at(&self, t: f64) -> f64 {
         let t = t.clamp(0.0, TEST_SECS);
         let ramp = smoothstep(t / CPU_RAMP_SECS);
-        let swing = self.center + self.amplitude * (std::f64::consts::TAU * self.swing_hz * t + self.swing_phase).sin();
+        let swing = 1.0 + self.amplitude * (std::f64::consts::TAU * self.swing_hz * t + self.swing_phase).sin();
         let settle = smoothstep((t - CPU_DIP_SECS) / (TEST_SECS - CPU_DIP_SECS));
         ramp * (swing * (1.0 - settle) + self.final_ratio * settle)
     }
@@ -467,32 +498,41 @@ mod tests {
             samples.windows(2).filter(|w| (w[0] < 0.0) != (w[1] < 0.0)).count()
         };
         for _ in 0..200 {
-            for m in [Material::Wood, Material::Stone, Material::Steel, Material::Ruby] {
+            for m in Material::ALL {
                 let cpu = CpuRun::new(m);
                 assert!(crossings(&cpu) >= 6, "{m:?} CPU should keep crossing the bar");
                 assert!(cpu.ratio_at(CPU_DIP_SECS) < 1.0, "{m:?} CPU should dip under right before the end");
             }
         }
-        // Harder materials swing wider (until diamond, which only goes under).
-        let amps: Vec<f64> =
-            [Material::Wood, Material::Stone, Material::Steel, Material::Ruby].map(|m| CpuRun::new(m).amplitude).to_vec();
+        // Harder materials swing wider.
+        let amps: Vec<f64> = Material::ALL.map(|m| CpuRun::new(m).amplitude).to_vec();
         assert!(amps.windows(2).all(|w| w[1] > w[0]));
     }
 
     #[test]
-    fn cpu_clears_the_bar_except_on_diamond() {
+    fn cpu_always_wins_below_diamond() {
         for _ in 0..200 {
-            for m in Material::ALL {
-                let cpu = CpuRun::new(m);
-                let end = cpu.ratio_at(TEST_SECS);
-                if m == Material::Diamond {
-                    let peak = (0..=3000).map(|i| cpu.ratio_at(i as f64 / 100.0)).fold(0.0, f64::max);
-                    assert!(peak < 1.0, "diamond CPU must never reach the bar (peak {peak})");
-                    assert!(!cpu.passes());
-                } else {
-                    assert!(end > 1.0, "CPU must end above the bar on {m:?} (ended {end})");
-                    assert!(cpu.passes());
+            for m in [Material::Wood, Material::Stone, Material::Steel, Material::Ruby] {
+                for player_passed in [true, false] {
+                    let mut cpu = CpuRun::new(m);
+                    cpu.resolve_diamond(player_passed);
+                    assert!(cpu.ratio_at(TEST_SECS) > 1.0, "{m:?}");
+                    assert!(cpu.passes(), "{m:?}");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn diamond_cpu_gets_the_opposite_of_the_player() {
+        for _ in 0..200 {
+            let cpu = CpuRun::new(Material::Diamond);
+            assert_eq!(cpu.ratio_at(TEST_SECS), 1.0, "undecided diamond CPU sits on the bar at the buzzer");
+            for player_passed in [true, false] {
+                let mut cpu = CpuRun::new(Material::Diamond);
+                cpu.resolve_diamond(player_passed);
+                assert_eq!(cpu.passes(), !player_passed);
+                assert_eq!(cpu.ratio_at(TEST_SECS) > 1.0, !player_passed);
             }
         }
     }

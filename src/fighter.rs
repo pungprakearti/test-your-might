@@ -9,6 +9,7 @@
 use eframe::egui;
 
 use crate::load_texture;
+use crate::progress::Material;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Character {
@@ -21,6 +22,17 @@ pub enum Character {
     SubZero,
 }
 
+// What it takes to unlock a character.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Unlock {
+    // Available from the start.
+    Default,
+    // Break this material for the first time.
+    Break(Material),
+    // Finish a round on this many different days (need not be in a row).
+    PlayedDays(usize),
+}
+
 impl Character {
     pub const ALL: [Character; 7] = [
         Character::JohnnyCage,
@@ -31,6 +43,30 @@ impl Character {
         Character::LiuKang,
         Character::SubZero,
     ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Character::JohnnyCage => "JOHNNY CAGE",
+            Character::Kano => "KANO",
+            Character::Scorpion => "SCORPION",
+            Character::SonyaBlade => "SONYA BLADE",
+            Character::Raiden => "RAIDEN",
+            Character::LiuKang => "LIU KANG",
+            Character::SubZero => "SUB-ZERO",
+        }
+    }
+
+    pub fn unlock(self) -> Unlock {
+        match self {
+            Character::LiuKang => Unlock::Default,
+            Character::JohnnyCage => Unlock::Break(Material::Wood),
+            Character::Kano => Unlock::Break(Material::Stone),
+            Character::Raiden => Unlock::Break(Material::Steel),
+            Character::SonyaBlade => Unlock::Break(Material::Ruby),
+            Character::SubZero => Unlock::Break(Material::Diamond),
+            Character::Scorpion => Unlock::PlayedDays(10),
+        }
+    }
 
     pub fn sprite_prefix(self) -> &'static str {
         match self {

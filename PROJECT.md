@@ -55,8 +55,9 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   fills, gauges + red target bars, fighters, materials, typing test.
 - Gauges and progression (`src/progress.rs`, `src/test_your_might.rs`):
   - Materials go wood -> stone -> steel -> ruby -> diamond; beating a
-    material's target moves to the next (diamond is last). Starts on wood at
-    5 WPM.
+    material's target moves to the next (diamond is last, and beating it
+    keeps you on diamond). Failing any material sends you back to wood; the
+    goal still comes from the recent average. Starts on wood at 5 WPM.
   - Target WPM = average of the last 5 runs minus a per-material reduction
     (wood 25%, stone 20%, steel 15%, ruby 10%, diamond 5%), rounded, never
     below 5. Pass = final WPM (rounded) >= target.
@@ -70,8 +71,11 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
     under the bar all round, dips under it at 27s, and climbs back just over
     by the buzzer, so it always looks like it nearly lost. Swings widen and
     the winning margin shrinks with harder materials (wood +/-15%, finishing
-    10-18% over; ruby +/-26%, finishing 3-6% over). On diamond it peaks at
-    97% of the bar again and again but never gets over it.
+    10-18% over; ruby +/-26%, finishing 3-6% over) and it always wins
+    below diamond. On diamond (+/-30%) its result is the opposite of the
+    player's: it settles exactly on the bar at the buzzer, then
+    `resolve_diamond` tips it 3-6% under (player won) or over (player lost)
+    and the eased gauge shows that as the strike lands.
   - Floor text: before the first key the header says "type to start   ESC
     choose fighter"; while typing it shows timer/wpm and material + goal.
     When time's up the words are replaced by a results panel
@@ -85,12 +89,18 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
     (frame 7, 0.4s in) each fighter who beat the goal gets the broken slab
     (`tym-<material>-2.png`), then after a 0.6s beat (`VICTORY_DELAY_SECS`)
     plays victory (8-9, holding on 9). A fighter who fell short holds on 7
-    with the slab intact. The CPU follows the same rules (fails only on
-    diamond).
+    with the slab intact. The CPU follows the same rules (it only fails on
+    diamond, when the player wins).
+  - Results panel "next" line: "Next: <MATERIAL>, goal N" after a win,
+    "Back to WOOD, goal N" after failing above wood, "Next: WOOD again"
+    after failing wood.
   - Saved to `progress.json` (material + every run's wpm/accuracy/target/
     pass/time) in the OS data dir (`directories` crate), or `$TYM_DATA_DIR`.
     Written atomically at the end of each round; an unparseable file is
     moved aside (`progress.json.unreadable-<unix time>`), never overwritten.
+  - `--reset` command-line flag (parsed in `main`) permanently deletes
+    `progress.json` (not the `.unreadable-*` backups) before the app starts.
+    Unknown flags are ignored with a warning.
 - Typing test lives on the Test Your Might screen, on the concrete floor strip
   of `tym-bg.png`: (0,208)-(436,291), 436x83, under a 1px highlight line at
   row 207. Compact layout (12px header, 3 lines of 14px words), centered
@@ -106,26 +116,27 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   250ms, starts on the first unlocked fighter, and is moved with arrow keys
   across the 7-portrait cross-shaped grid
   (`CHAR_CELLS` in `src/char_select.rs`); Enter only confirms on an unlocked
-  character (currently just Liu Kang).
-- Each `CHAR_CELLS` entry carries an `UnlockCondition` flag (`Default`,
-  `WpmTier(Wood/Stone/Iron/Ruby/Diamond)`, or `PlayedDays(10)`) mapped
-  alphabetically: Wood=Johnny Cage, Stone=Kano, Iron=Raiden, Ruby=Sonya Blade,
-  Diamond=Sub-Zero, PlayedDays(10)=Scorpion, Default=Liu Kang. `is_unlocked`
-  is still a placeholder that only returns true for `Default`, since the tier
-  averaging and day-tracking to evaluate the others for real isn't built.
-  When a character *is* unlocked, its `cs-<name>.png` portrait is drawn over
-  its cell in addition to becoming selectable.
+  character. A hint line on a dark pill under the grid (centered at
+  (218, 264), in the plain stone below the frame edge at y=236) names the
+  highlighted fighter and says "ENTER to fight" or how to unlock them.
+- Unlocks (`Character::unlock` in `fighter.rs`, evaluated by
+  `Progress::is_unlocked` from saved runs - nothing extra is stored): Liu Kang
+  from the start; breaking a material for the first time unlocks wood =
+  Johnny Cage, stone = Kano, steel = Raiden, ruby = Sonya Blade, diamond =
+  Sub-Zero; Scorpion after finishing a round on 10 different local calendar
+  days (any 10, not a streak; `chrono` for local dates). This replaced the
+  original "% of first-3-round average" tier idea (user's call). Unlocked
+  fighters get their `cs-<name>.png` portrait drawn over the cell; the
+  results panel announces new unlocks ("... JOHNNY CAGE UNLOCKED!").
 
 ## Not yet built
 
-- Three-test average + wood/stone/iron/ruby/diamond tier thresholds, and
-  wiring `is_unlocked` up to them plus a played-days tracker for Scorpion.
 - The `*_placement.png` files are reference art only and aren't drawn.
-- Character-unlock tiers (`WpmTier` in `char_select.rs`, still named
-  Wood/Stone/Iron/...) aren't connected to the material progression yet.
-- Windows build/packaging (developed so far on WSL/Linux; need a cross-build
-  or native Windows build pass before shipping the floating always-on-top
-  window on actual Windows).
+- Real-Windows verification of the release `.exe` (always-on-top, dragging,
+  save location). Releases: pushing a `v*` tag runs
+  `.github/workflows/release.yml` on windows-latest (test, build, publish
+  `test-your-might.exe` to a GitHub Release). Release builds use
+  `windows_subsystem = "windows"` (no console). App icon not set yet.
 
 ## Open questions
 

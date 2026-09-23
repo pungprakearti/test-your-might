@@ -1,3 +1,7 @@
+// Release builds are a windowed app on Windows: no console window behind the
+// game. Debug builds keep the console for logs.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 // Test Your Might - arcade cabinet app scaffold.
 // Window is fixed at 500x700 to match mk-cabinet.png. Each screen (character
 // select, then Test Your Might with the typing test on its floor) renders only
@@ -53,13 +57,17 @@ struct App {
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let bg_texture = load_texture(&cc.egui_ctx, "cabinet-bg", include_bytes!("../assets/mk-cabinet.png"));
+        let test_your_might = TestYourMightScreen::new(cc);
         let mut app = Self {
             bg_texture,
             screen: Screen::CharSelect,
-            char_select: CharSelectScreen::new(cc),
-            test_your_might: TestYourMightScreen::new(cc),
+            char_select: CharSelectScreen::new(cc, test_your_might.progress()),
+            test_your_might,
             dev_screenshot: dev::Screenshot::from_env(),
         };
+        if let Some(character) = dev::select_character() {
+            app.char_select.dev_select(character);
+        }
         if let Some(character) = dev::start_character() {
             app.test_your_might.start_match(&cc.egui_ctx, character, 0.0);
             app.screen = Screen::TestYourMight;
@@ -88,7 +96,7 @@ impl eframe::App for App {
             }
             Screen::TestYourMight => {
                 if self.test_your_might.handle_input(ctx) == test_your_might::Action::CharacterSelect {
-                    self.char_select.reopen();
+                    self.char_select.reopen(self.test_your_might.progress());
                     self.screen = Screen::CharSelect;
                 }
             }
@@ -158,6 +166,19 @@ impl eframe::App for App {
 }
 
 fn main() -> eframe::Result<()> {
+    // Command-line flags:
+    //   --reset  delete the saved progress, then start fresh
+    for arg in std::env::args().skip(1) {
+        match arg.as_str() {
+            "--reset" => match progress::Progress::delete_save() {
+                Ok(Some(path)) => eprintln!("--reset: deleted {}", path.display()),
+                Ok(None) => eprintln!("--reset: no saved progress to delete"),
+                Err(e) => eprintln!("--reset: couldn't delete saved progress: {e}"),
+            },
+            other => eprintln!("ignoring unknown argument {other:?} (supported: --reset)"),
+        }
+    }
+
     let viewport = egui::ViewportBuilder::default()
         .with_inner_size([WINDOW_W, WINDOW_H])
         .with_resizable(false)

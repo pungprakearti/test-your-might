@@ -4,7 +4,10 @@
 // per-material percentage so easier materials are more forgiving.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::PathBuf;
+
+use crate::fighter::{Character, Unlock};
 
 // Target before there's any history to average.
 pub const START_TARGET_WPM: f64 = 5.0;
@@ -102,16 +105,33 @@ impl Progress {
     }
 
     // Records a finished run against `target_wpm` (the target shown during
-    // it), advancing to the next material if it was beaten. Compared on the
-    // whole-number WPM the player sees.
+    // it). Beating it advances to the next material; falling short sends the
+    // player back to wood to start the climb over (the goal still comes from
+    // their recent average). Compared on the whole-number WPM the player sees.
     pub fn record(&mut self, wpm: f64, accuracy: f64, target_wpm: f64) -> Run {
         let passed = wpm.round() >= target_wpm;
         let run = Run { wpm, accuracy, material: self.material, target_wpm, passed, finished_at: unix_now() };
         self.runs.push(run.clone());
-        if passed {
-            self.material = self.material.next();
-        }
+        self.material = if passed { self.material.next() } else { Material::Wood };
         run
+    }
+
+    // Whether this material has ever been broken.
+    pub fn has_broken(&self, material: Material) -> bool {
+        self.runs.iter().any(|r| r.material == material && r.passed)
+    }
+
+    // How many different local calendar days have a finished round.
+    pub fn days_played(&self) -> usize {
+        self.runs.iter().filter_map(|r| local_date(r.finished_at)).collect::<HashSet<_>>().len()
+    }
+
+    pub fn is_unlocked(&self, character: Character) -> bool {
+        match character.unlock() {
+            Unlock::Default => true,
+            Unlock::Break(material) => self.has_broken(material),
+            Unlock::PlayedDays(days) => self.days_played() >= days,
+        }
     }
 
     // Loads saved progress, or starts fresh if there is none (or it can't be
@@ -139,6 +159,19 @@ impl Progress {
         }
     }
 
+    // Permanently deletes the save file (for `--reset`). Returns the path it
+    // deleted, or None if there was no save to delete.
+    pub fn delete_save() -> std::io::Result<Option<PathBuf>> {
+        let Some(path) = save_path() else {
+            return Ok(None);
+        };
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(Some(path)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     pub fn save(&self) {
         let Some(path) = save_path() else {
             eprintln!("progress: no data directory available, not saving");
@@ -148,6 +181,11 @@ impl Progress {
             eprintln!("progress: can't save {}: {e}", path.display());
         }
     }
+}
+
+fn local_date(unix_secs: u64) -> Option<chrono::NaiveDate> {
+    use chrono::TimeZone;
+    chrono::Local.timestamp_opt(i64::try_from(unix_secs).ok()?, 0).single().map(|t| t.date_naive())
 }
 
 fn unix_now() -> u64 {
@@ -218,7 +256,22 @@ mod tests {
     }
 
     #[test]
-    fn passing_advances_material_and_failing_does_not() {
+    fn failing_sends_you_back_to_wood_keeping_your_average() {
+        let mut p = Progress::default();
+        for _ in 0..3 {
+            p.record(40.0, 100.0, 5.0);
+        }
+        assert_eq!(p.material, Material::Ruby);
+        let goal_before = p.target_wpm();
+        let run = p.record(10.0, 100.0, goal_before);
+        assert!(!run.passed);
+        assert_eq!(p.material, Material::Wood);
+        // Average of 40, 40, 40, 10 = 32.5, less wood's 25%.
+        assert_eq!(p.target_wpm(), (32.5_f64 * 0.75).round());
+    }
+
+    #[test]
+    fn passing_advances_material_and_failing_wood_stays_on_wood() {
         let mut p = Progress::default();
         let run = p.record(4.0, 90.0, 5.0);
         assert!(!run.passed);
@@ -236,6 +289,47 @@ mod tests {
             m = m.next();
             assert_eq!(m, expected);
         }
+    }
+
+    fn run(material: Material, passed: bool, finished_at: u64) -> Run {
+        Run { wpm: 50.0, accuracy: 100.0, material, target_wpm: 40.0, passed, finished_at }
+    }
+
+    #[test]
+    fn only_liu_kang_is_unlocked_at_first() {
+        let p = Progress::default();
+        for c in Character::ALL {
+            assert_eq!(p.is_unlocked(c), c == Character::LiuKang, "{c:?}");
+        }
+    }
+
+    #[test]
+    fn breaking_a_material_unlocks_its_fighter() {
+        let mut p = Progress::default();
+        p.runs.push(run(Material::Stone, false, 0));
+        assert!(!p.is_unlocked(Character::Kano), "failing stone doesn't unlock Kano");
+        p.runs.push(run(Material::Wood, true, 0));
+        p.runs.push(run(Material::Stone, true, 0));
+        let unlocked: Vec<Character> = Character::ALL.into_iter().filter(|&c| p.is_unlocked(c)).collect();
+        assert_eq!(unlocked, [Character::JohnnyCage, Character::Kano, Character::LiuKang]);
+    }
+
+    #[test]
+    fn scorpion_needs_ten_different_days() {
+        const DAY: u64 = 24 * 60 * 60;
+        let start = 1_790_000_000;
+        let mut p = Progress::default();
+        for day in 0..9 {
+            // Several rounds on the same moment only count once.
+            p.runs.push(run(Material::Wood, false, start + day * DAY));
+            p.runs.push(run(Material::Wood, false, start + day * DAY));
+        }
+        // Days don't need to be in a row.
+        p.runs.push(run(Material::Wood, false, start + 30 * DAY));
+        assert_eq!(p.days_played(), 9 + 1);
+        assert!(p.is_unlocked(Character::Scorpion));
+        p.runs.pop();
+        assert!(!p.is_unlocked(Character::Scorpion));
     }
 
     #[test]

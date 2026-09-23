@@ -40,6 +40,8 @@ or just open a new terminal tab.
 
   - `TYM_DEV_START=<sprite prefix>` skips character select and starts a
     match as that character (`liu_kang`, `kano`, `sub_zero`, ...).
+  - `TYM_DEV_SELECT=<sprite prefix>` puts the character select cursor on
+    that fighter at startup (e.g. to see a locked fighter's unlock hint).
   - `TYM_DEV_TYPE=<text>` feeds text into the typing test at startup.
   - `TYM_DEV_TYPE_WORDS=<n>` correctly types the test's first n words at
     startup, before any `TYM_DEV_TYPE` text (useful for a known WPM; e.g. with `TYM_DEV_DELAY=31.5` to see a
