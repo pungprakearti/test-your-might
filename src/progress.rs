@@ -106,11 +106,7 @@ impl Progress {
     // whole-number WPM the player sees.
     pub fn record(&mut self, wpm: f64, accuracy: f64, target_wpm: f64) -> Run {
         let passed = wpm.round() >= target_wpm;
-        let finished_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or_default();
-        let run = Run { wpm, accuracy, material: self.material, target_wpm, passed, finished_at };
+        let run = Run { wpm, accuracy, material: self.material, target_wpm, passed, finished_at: unix_now() };
         self.runs.push(run.clone());
         if passed {
             self.material = self.material.next();
@@ -126,7 +122,13 @@ impl Progress {
         };
         match std::fs::read_to_string(&path) {
             Ok(json) => serde_json::from_str(&json).unwrap_or_else(|e| {
-                eprintln!("progress: ignoring unreadable {}: {e}", path.display());
+                // Move it aside rather than let the next save overwrite it, so
+                // the history can still be recovered by hand.
+                let backup = path.with_extension(format!("json.unreadable-{}", unix_now()));
+                eprintln!("progress: can't parse {} ({e}); moving it to {}", path.display(), backup.display());
+                if let Err(e) = std::fs::rename(&path, &backup) {
+                    eprintln!("progress: couldn't move it aside: {e}");
+                }
                 Progress::default()
             }),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Progress::default(),
@@ -146,6 +148,10 @@ impl Progress {
             eprintln!("progress: can't save {}: {e}", path.display());
         }
     }
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default()
 }
 
 // progress.json in the OS data directory, or in $TYM_DATA_DIR when set (dev

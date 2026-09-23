@@ -42,7 +42,7 @@ or just open a new terminal tab.
     match as that character (`liu_kang`, `kano`, `sub_zero`, ...).
   - `TYM_DEV_TYPE=<text>` feeds text into the typing test at startup.
   - `TYM_DEV_TYPE_WORDS=<n>` correctly types the test's first n words at
-    startup (useful for a known WPM; e.g. with `TYM_DEV_DELAY=31.5` to see a
+    startup, before any `TYM_DEV_TYPE` text (useful for a known WPM; e.g. with `TYM_DEV_DELAY=31.5` to see a
     finished round).
   - `TYM_DEV_SCREENSHOT=<path.png>` saves the full 500x700 window after
     `TYM_DEV_DELAY` seconds (default 1.0) and quits. The cabinet screen is

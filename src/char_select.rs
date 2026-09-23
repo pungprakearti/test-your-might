@@ -130,9 +130,15 @@ impl CharSelectScreen {
             cs_sel1_texture,
             cs_sel2_texture,
             cs_portrait_textures,
-            selected: 0,
+            // Start on a fighter that can actually be picked.
+            selected: CHAR_CELLS.iter().position(|c| !c.locked()).unwrap_or(0),
             confirmed: false,
         }
+    }
+
+    // Back from a match: pick again, starting from the last choice.
+    pub fn reopen(&mut self) {
+        self.confirmed = false;
     }
 
     pub fn selected_character(&self) -> Character {

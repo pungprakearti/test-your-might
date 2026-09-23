@@ -66,10 +66,21 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
     surge past the bar.
   - Player 1 "speed" blends the rolling last-3s WPM toward the overall test
     WPM as the 30s go on, landing exactly on the final WPM; drawn eased.
-  - CPU (player 2) is scripted: it always ends above the bar, except on
-    diamond where it never reaches it.
-  - Header shows material + goal while typing, then "<MATERIAL> BROKEN!" or
-    "FAILED"; R starts the next round (fighters back to idle).
+  - CPU (player 2) is scripted (`CpuRun`): it charges up, swings over and
+    under the bar all round, dips under it at 27s, and climbs back just over
+    by the buzzer, so it always looks like it nearly lost. Swings widen and
+    the winning margin shrinks with harder materials (wood +/-15%, finishing
+    10-18% over; ruby +/-26%, finishing 3-6% over). On diamond it peaks at
+    97% of the bar again and again but never gets over it.
+  - Floor text: before the first key the header says "type to start   ESC
+    choose fighter"; while typing it shows timer/wpm and material + goal.
+    When time's up the words are replaced by a results panel
+    (`typing_test::draw_panel`, same layout): WPM/ACC vs goal, "<MATERIAL>
+    BROKEN!" or "TOO SLOW - <MATERIAL> HELD", the next material + goal, and
+    "ENTER next round   ESC choose fighter".
+  - Keys: Enter (or R) after a round starts the next one (fighters back to
+    idle); Esc anywhere on this screen returns to character select, which
+    keeps the last pick. A round quit midway isn't recorded.
   - End of round (timer hits 0): both fighters strike (frames 5-7). At impact
     (frame 7, 0.4s in) each fighter who beat the goal gets the broken slab
     (`tym-<material>-2.png`), then after a 0.6s beat (`VICTORY_DELAY_SECS`)
@@ -78,16 +89,22 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
     diamond).
   - Saved to `progress.json` (material + every run's wpm/accuracy/target/
     pass/time) in the OS data dir (`directories` crate), or `$TYM_DATA_DIR`.
+    Written atomically at the end of each round; an unparseable file is
+    moved aside (`progress.json.unreadable-<unix time>`), never overwritten.
 - Typing test lives on the Test Your Might screen, on the concrete floor strip
   of `tym-bg.png`: (0,208)-(436,291), 436x83, under a 1px highlight line at
   row 207. Compact layout (12px header, 3 lines of 14px words), centered
   vertically, over a black wash at alpha 150 so gray untyped words stay
-  readable on gray concrete. A new test starts with each match. There's no
+  readable on gray concrete. Letters: correct = teal, wrong = red, rest of
+  the current word = light gray (200), upcoming words = gray (150). Letters
+  typed past a word's end are shown after it in dark red (max 10 per word,
+  `MAX_EXTRA_CHARS`), and the caret follows them. A new test starts with each match. There's no
   separate typing screen anymore.
 - App now opens on a character select screen (`cs-background.png` drawn over
   the cabinet screen rect) instead of straight into the typing test. A
   green-frame selector (`cs-selected-1.png`/`cs-selected-2.png`) blinks every
-  250ms and is moved with arrow keys across the 7-portrait cross-shaped grid
+  250ms, starts on the first unlocked fighter, and is moved with arrow keys
+  across the 7-portrait cross-shaped grid
   (`CHAR_CELLS` in `src/char_select.rs`); Enter only confirms on an unlocked
   character (currently just Liu Kang).
 - Each `CHAR_CELLS` entry carries an `UnlockCondition` flag (`Default`,

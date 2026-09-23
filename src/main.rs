@@ -64,11 +64,12 @@ impl App {
             app.test_your_might.start_match(&cc.egui_ctx, character, 0.0);
             app.screen = Screen::TestYourMight;
         }
-        if let Some(text) = dev::typed_text() {
-            app.test_your_might.dev_type(&text);
-        }
+        // Correct words first, then any free text after them.
         if let Some(n) = dev::typed_words() {
             app.test_your_might.dev_type_words(n);
+        }
+        if let Some(text) = dev::typed_text() {
+            app.test_your_might.dev_type(&text);
         }
         app
     }
@@ -86,7 +87,10 @@ impl eframe::App for App {
                 }
             }
             Screen::TestYourMight => {
-                self.test_your_might.handle_input(ctx);
+                if self.test_your_might.handle_input(ctx) == test_your_might::Action::CharacterSelect {
+                    self.char_select.reopen();
+                    self.screen = Screen::CharSelect;
+                }
             }
         }
         ctx.request_repaint_after(Duration::from_millis(100));

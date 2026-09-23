@@ -9,7 +9,7 @@ use eframe::egui;
 use crate::fighter::{Character, Fighter, Pose};
 use crate::load_texture;
 use crate::progress::{Material, Progress, Run};
-use crate::typing_test::TypingScreen;
+use crate::typing_test::{self, TypingScreen};
 
 // Fighter foot-anchor points on this screen (bottom-center, in tym-bg.png
 // pixel coordinates). Every character drawn here uses one of these two spots
@@ -51,6 +51,20 @@ const TARGET_BAR_THICKNESS: f32 = 2.0;
 const GAUGE_EASE_RATE: f32 = 8.0;
 // The beat between a slab breaking and the victory animation starting.
 const VICTORY_DELAY_SECS: f64 = 0.6;
+
+// What the Test Your Might screen asks the app to do after handling input.
+#[derive(PartialEq)]
+pub enum Action {
+    Stay,
+    // Esc: go back to character select.
+    CharacterSelect,
+}
+
+// Text colors for the end-of-round panel.
+const RESULT_GOOD: egui::Color32 = egui::Color32::from_rgb(120, 220, 140);
+const RESULT_BAD: egui::Color32 = egui::Color32::from_rgb(235, 70, 70);
+const RESULT_GOLD: egui::Color32 = egui::Color32::from_rgb(240, 200, 40);
+const RESULT_TEXT: egui::Color32 = egui::Color32::from_gray(200);
 
 // The concrete floor strip the typing test sits on (tym-bg.png pixel
 // coordinates): full width, from just under the 1px highlight line at row 207
@@ -170,17 +184,22 @@ impl TestYourMightScreen {
         self.p2_fill = 0.0;
     }
 
-    pub fn handle_input(&mut self, ctx: &egui::Context) {
+    pub fn handle_input(&mut self, ctx: &egui::Context) -> Action {
         let now = ctx.input(|i| i.time);
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            return Action::CharacterSelect;
+        }
         self.typing.handle_input(ctx);
         if self.typing.finished() && self.round.result.is_none() {
             let run = self.progress.record(self.typing.wpm(), self.typing.accuracy(), self.round.target_wpm);
             self.progress.save();
             self.round.result = Some(run);
             self.round.ended_at = Some(now);
-        } else if self.round.result.is_some() && ctx.input(|i| i.key_pressed(egui::Key::R)) {
+        } else if self.round.result.is_some()
+            && ctx.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::R))
+        {
             self.start_round(now);
-            return;
+            return Action::Stay;
         }
         if let (Some([p1_end, p2_end]), Some((p1, p2))) = (self.endings(now), &mut self.fighters) {
             p1.set_pose(p1_end.pose, p1_end.pose_started);
@@ -189,6 +208,7 @@ impl TestYourMightScreen {
                 ctx.request_repaint_after(std::time::Duration::from_secs_f64((next - now).max(0.0)));
             }
         }
+        Action::Stay
     }
 
     // Each fighter's end-of-round state, once the timer has run out.
@@ -217,13 +237,37 @@ impl TestYourMightScreen {
         (p1_wpm / self.round.target_wpm, self.round.cpu.ratio_at(self.typing.elapsed_secs()))
     }
 
-    fn status_text(&self) -> String {
+    // Draws the floor strip: the typing test while a round is on, then the
+    // round's results and what to do next.
+    fn draw_floor(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, floor: egui::Rect) {
         let material = self.round.material.label();
-        match &self.round.result {
-            None => format!("{material}  goal {:.0}", self.round.target_wpm),
-            Some(run) if run.passed => format!("{material} BROKEN!  (R)"),
-            Some(_) => "FAILED  (R)".to_string(),
-        }
+        let Some(run) = &self.round.result else {
+            let status = format!("{material}  goal {:.0}", self.round.target_wpm);
+            self.typing.draw(ui, ctx, floor, &status, "type to start   ESC choose fighter");
+            return;
+        };
+        let stats = format!("WPM {:.0}   ACC {:.0}%", run.wpm, run.accuracy);
+        let goal = format!("goal {:.0}", run.target_wpm);
+        let (verdict, verdict_color) = if run.passed {
+            (format!("{material} BROKEN!"), RESULT_GOLD)
+        } else {
+            (format!("TOO SLOW - {material} HELD"), RESULT_BAD)
+        };
+        // Progress has already recorded this run, so it holds the next round.
+        let next_material = self.progress.material.label();
+        let next_goal = self.progress.target_wpm();
+        let next = if self.progress.material == self.round.material {
+            format!("Next: {next_material} again, goal {next_goal:.0}")
+        } else {
+            format!("Next: {next_material}, goal {next_goal:.0}")
+        };
+        typing_test::draw_panel(
+            ui,
+            floor,
+            (&stats, if run.passed { RESULT_GOOD } else { RESULT_BAD }),
+            (&goal, RESULT_GOLD),
+            &[(&verdict, verdict_color), (&next, RESULT_TEXT), ("ENTER next round   ESC choose fighter", RESULT_TEXT)],
+        );
     }
 
     // Layers, back to front: background, gauge fills, gauges + target bars,
@@ -286,8 +330,7 @@ impl TestYourMightScreen {
         }
 
         let floor = egui::Rect::from_min_max(at(FLOOR_MIN), at(FLOOR_MAX));
-        let status = self.status_text();
-        self.typing.draw(ui, ctx, floor, &status);
+        self.draw_floor(ui, ctx, floor);
     }
 }
 
@@ -305,32 +348,50 @@ fn fill_fraction(ratio: f64, bar: f32) -> f32 {
     (ratio as f32 * bar).clamp(0.0, 1.0)
 }
 
-// The CPU's scripted gauge for one round. It always clears the bar, except on
-// diamond, where it always falls short.
+// The CPU's scripted gauge for one round. It charges up, then swings over and
+// under the red bar the whole test, dips under it a few seconds before the
+// end, and climbs back over just before time runs out - so it always looks
+// like it almost lost. Harder materials swing wider and finish closer to the
+// bar. Diamond is the exception: it rises to just under the bar again and
+// again but never gets over it.
 struct CpuRun {
+    // Midpoint of the swing, as a multiple of the target (1.0 = the bar).
+    center: f64,
+    // Swing size either side of `center`.
+    amplitude: f64,
+    // Where it lands at the end of the test.
     final_ratio: f64,
-    wobble_hz: f64,
-    wobble_phase: f64,
+    swing_hz: f64,
+    // Chosen so the swing bottoms out exactly at CPU_DIP_SECS.
+    swing_phase: f64,
 }
 
-// The CPU's speed wobbles by up to this fraction, fading out by the end.
-const CPU_WOBBLE: f64 = 0.12;
 // Seconds for the CPU gauge to charge up at the start, like the player's.
 const CPU_RAMP_SECS: f64 = 3.0;
+// When the last dip under the bar bottoms out; from here it settles onto its
+// final value by the end of the test.
+const CPU_DIP_SECS: f64 = 27.0;
 const TEST_SECS: f64 = 30.0;
+// On diamond, how close under the bar the swing peaks get.
+const DIAMOND_PEAK: f64 = 0.97;
 
 impl CpuRun {
     fn new(material: Material) -> Self {
         use rand::Rng;
         let mut rng = rand::thread_rng();
-        // Diamond range tops out low enough that even the peak wobble stays
-        // under the bar: 0.85 * (1 + CPU_WOBBLE) < 1.
-        let final_ratio = if material == Material::Diamond { rng.gen_range(0.70..0.85) } else { rng.gen_range(1.15..1.5) };
-        CpuRun {
-            final_ratio,
-            wobble_hz: rng.gen_range(0.15..0.3),
-            wobble_phase: rng.gen_range(0.0..std::f64::consts::TAU),
-        }
+        // (swing amplitude, final ratio range) - wider swings and thinner
+        // winning margins as the materials get harder.
+        let (amplitude, finish) = match material {
+            Material::Wood => (0.15, 1.10..1.18),
+            Material::Stone => (0.18, 1.07..1.12),
+            Material::Steel => (0.22, 1.05..1.09),
+            Material::Ruby => (0.26, 1.03..1.06),
+            Material::Diamond => (0.20, 0.93..0.96),
+        };
+        let center = if material == Material::Diamond { DIAMOND_PEAK - amplitude } else { 1.0 };
+        let swing_hz = rng.gen_range(0.18..0.28);
+        let swing_phase = -std::f64::consts::FRAC_PI_2 - std::f64::consts::TAU * swing_hz * CPU_DIP_SECS;
+        CpuRun { center, amplitude, final_ratio: rng.gen_range(finish), swing_hz, swing_phase }
     }
 
     // Whether the CPU's final speed clears the bar (breaks its slab).
@@ -341,10 +402,17 @@ impl CpuRun {
     // Speed as a multiple of the target, `t` seconds into the test.
     fn ratio_at(&self, t: f64) -> f64 {
         let t = t.clamp(0.0, TEST_SECS);
-        let ramp = (t / CPU_RAMP_SECS).min(1.0);
-        let wobble = CPU_WOBBLE * (1.0 - t / TEST_SECS) * (std::f64::consts::TAU * self.wobble_hz * t + self.wobble_phase).sin();
-        self.final_ratio * ramp * (1.0 + wobble)
+        let ramp = smoothstep(t / CPU_RAMP_SECS);
+        let swing = self.center + self.amplitude * (std::f64::consts::TAU * self.swing_hz * t + self.swing_phase).sin();
+        let settle = smoothstep((t - CPU_DIP_SECS) / (TEST_SECS - CPU_DIP_SECS));
+        ramp * (swing * (1.0 - settle) + self.final_ratio * settle)
     }
+}
+
+// 0 below 0, 1 above 1, and an eased S-curve in between.
+fn smoothstep(x: f64) -> f64 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
 }
 
 // Draws `tex` at its native pixel size (never resized) with its top-left at
@@ -390,6 +458,25 @@ mod tests {
                 Ending { pose: Pose::Strike, pose_started: 100.0, broken: false, next_change: None }
             );
         }
+    }
+
+    #[test]
+    fn cpu_swings_over_and_under_the_bar_and_nearly_loses() {
+        let crossings = |cpu: &CpuRun| {
+            let samples: Vec<f64> = (400..=2700).map(|i| cpu.ratio_at(i as f64 / 100.0) - 1.0).collect();
+            samples.windows(2).filter(|w| (w[0] < 0.0) != (w[1] < 0.0)).count()
+        };
+        for _ in 0..200 {
+            for m in [Material::Wood, Material::Stone, Material::Steel, Material::Ruby] {
+                let cpu = CpuRun::new(m);
+                assert!(crossings(&cpu) >= 6, "{m:?} CPU should keep crossing the bar");
+                assert!(cpu.ratio_at(CPU_DIP_SECS) < 1.0, "{m:?} CPU should dip under right before the end");
+            }
+        }
+        // Harder materials swing wider (until diamond, which only goes under).
+        let amps: Vec<f64> =
+            [Material::Wood, Material::Stone, Material::Steel, Material::Ruby].map(|m| CpuRun::new(m).amplitude).to_vec();
+        assert!(amps.windows(2).all(|w| w[1] > w[0]));
     }
 
     #[test]

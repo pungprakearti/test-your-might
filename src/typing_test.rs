@@ -6,6 +6,9 @@ use eframe::egui;
 use std::time::{Duration, Instant};
 
 const TEST_DURATION: Duration = Duration::from_secs(30);
+// Letters typed past the end of a word are kept and shown (in red), up to
+// this many; further ones are ignored so the word can't run off the line.
+const MAX_EXTRA_CHARS: usize = 10;
 // Window for the "current speed" reading that drives the gauge.
 const LIVE_WINDOW_SECS: f64 = 3.0;
 
@@ -21,7 +24,7 @@ const WORDS: &[&str] = &[
     "sentence", "great", "think", "say", "help", "low", "line", "differ", "turn", "cause",
 ];
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum CharState {
     Untyped,
     Correct,
@@ -50,6 +53,15 @@ struct TestState {
     // (seconds since start, correct_chars) after every change, for the
     // rolling live-speed reading.
     samples: Vec<(f64, usize)>,
+}
+
+impl TypedWord {
+    // What's shown for this word: its target letters, then any extra letters
+    // typed past its end - as (letter index, letter).
+    fn display_chars(&self) -> impl Iterator<Item = (usize, char)> + '_ {
+        let extras = self.typed.chars().skip(self.target.chars().count());
+        self.target.chars().chain(extras).enumerate()
+    }
 }
 
 impl TestState {
@@ -124,6 +136,9 @@ impl TestState {
         }
         let word = &mut self.words[self.current_word];
         let idx = word.typed.chars().count();
+        if idx >= word.target.chars().count() + MAX_EXTRA_CHARS {
+            return;
+        }
         word.typed.push(c);
         self.total_keystrokes += 1;
         if let Some(expected) = word.target.chars().nth(idx) {
@@ -321,10 +336,66 @@ impl TypingScreen {
         self.test.live_wpm()
     }
 
-    // `status` is shown right-aligned in the header row.
-    pub fn draw(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, rect: egui::Rect, status: &str) {
+    // `status` is shown right-aligned in the header row; `idle_hint` replaces
+    // the timer on the left until the first keypress.
+    pub fn draw(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, rect: egui::Rect, status: &str, idle_hint: &str) {
         let dt = ctx.input(|i| i.stable_dt);
-        draw_screen(ui, &self.test, rect, &mut self.caret_pos, dt, status);
+        draw_screen(ui, &self.test, rect, &mut self.caret_pos, dt, status, idle_hint);
+    }
+}
+
+// Where things go on the floor strip: a header row and VISIBLE_LINES text
+// lines under it, centered vertically. Shared by the typing test and the
+// end-of-round panel so they line up exactly.
+struct FloorLayout {
+    header: egui::Rect,
+    header_font: egui::FontId,
+    // Top-left of the first text line, the line font, and the step between
+    // lines.
+    lines_min: egui::Pos2,
+    lines_max: egui::Pos2,
+    line_font: egui::FontId,
+    line_h: f32,
+}
+
+impl FloorLayout {
+    fn new(ui: &egui::Ui, rect: egui::Rect) -> Self {
+        let header_font = egui::FontId::monospace(HEADER_FONT);
+        let header_h = ui.fonts(|f| f.row_height(&header_font));
+        let line_font = egui::FontId::monospace(WORD_FONT);
+        let line_h = ui.fonts(|f| f.row_height(&line_font));
+        let content_h =
+            header_h + HEADER_GAP + VISIBLE_LINES as f32 * line_h + (VISIBLE_LINES - 1) as f32 * LINE_GAP;
+        let top = (rect.center().y - content_h / 2.0).round();
+        let inner = egui::Rect::from_x_y_ranges(rect.min.x + PAD_X..=rect.max.x - PAD_X, top..=top + content_h);
+        FloorLayout {
+            header: egui::Rect::from_min_size(inner.min, egui::vec2(inner.width(), header_h)),
+            header_font,
+            lines_min: egui::pos2(inner.min.x, inner.min.y + header_h + HEADER_GAP),
+            lines_max: inner.max,
+            line_font,
+            line_h,
+        }
+    }
+
+    fn line_top(&self, i: usize) -> f32 {
+        self.lines_min.y + i as f32 * (self.line_h + LINE_GAP)
+    }
+}
+
+// A line of text on the floor panel.
+pub type PanelText<'a> = (&'a str, egui::Color32);
+
+// Draws a static text panel on the floor strip in the typing test's style:
+// the header row (left + right text) and up to VISIBLE_LINES lines.
+pub fn draw_panel(ui: &egui::Ui, rect: egui::Rect, header_left: PanelText, header_right: PanelText, lines: &[PanelText]) {
+    let painter = ui.painter();
+    painter.rect_filled(rect, 0.0, egui::Color32::from_black_alpha(BACKDROP_ALPHA));
+    let layout = FloorLayout::new(ui, rect);
+    painter.text(layout.header.left_center(), egui::Align2::LEFT_CENTER, header_left.0, layout.header_font.clone(), header_left.1);
+    painter.text(layout.header.right_center(), egui::Align2::RIGHT_CENTER, header_right.0, layout.header_font.clone(), header_right.1);
+    for (i, (text, color)) in lines.iter().take(VISIBLE_LINES).enumerate() {
+        painter.text(egui::pos2(layout.lines_min.x, layout.line_top(i)), egui::Align2::LEFT_TOP, *text, layout.line_font.clone(), *color);
     }
 }
 
@@ -337,6 +408,15 @@ const WORD_FONT: f32 = 14.0;
 // Dark wash over the concrete so the gray untyped words stay readable while
 // the floor texture still shows through.
 const BACKDROP_ALPHA: u8 = 150;
+// Letter colors: typed correctly, not yet typed in the word you're on, and
+// words still ahead.
+const CORRECT_COLOR: egui::Color32 = egui::Color32::from_rgb(45, 212, 191);
+const CURRENT_WORD_COLOR: egui::Color32 = egui::Color32::from_gray(200);
+const UPCOMING_COLOR: egui::Color32 = egui::Color32::from_gray(150);
+// Instructions shown before the test starts.
+const HINT_COLOR: egui::Color32 = egui::Color32::from_rgb(200, 200, 210);
+// Extra letters typed past the end of a word.
+const EXTRA_COLOR: egui::Color32 = egui::Color32::from_rgb(170, 45, 45);
 const POP_IN_SECS: f32 = 0.12;
 const POP_RISE: f32 = 5.0;
 
@@ -347,24 +427,22 @@ fn draw_screen(
     caret_pos: &mut Option<egui::Pos2>,
     dt: f32,
     status: &str,
+    idle_hint: &str,
 ) {
     let ctx = ui.ctx().clone();
     let painter = ui.painter();
     painter.rect_filled(rect, 0.0, egui::Color32::from_black_alpha(BACKDROP_ALPHA));
 
-    // Header row + 3 word lines, centered vertically in the strip.
-    let header_font = egui::FontId::monospace(HEADER_FONT);
-    let header_h = ui.fonts(|f| f.row_height(&header_font));
-    let font = egui::FontId::monospace(WORD_FONT);
-    let line_h = ui.fonts(|f| f.row_height(&font));
-    let content_h =
-        header_h + HEADER_GAP + VISIBLE_LINES as f32 * line_h + (VISIBLE_LINES - 1) as f32 * LINE_GAP;
-    let top = (rect.center().y - content_h / 2.0).round();
-    let inner = egui::Rect::from_x_y_ranges(rect.min.x + PAD_X..=rect.max.x - PAD_X, top..=top + content_h);
+    let layout = FloorLayout::new(ui, rect);
+    let header_font = layout.header_font.clone();
+    let font = layout.line_font.clone();
+    let line_h = layout.line_h;
 
     // Header: timer / results
-    let header_rect = egui::Rect::from_min_size(inner.min, egui::vec2(inner.width(), header_h));
-    if test.finished {
+    let header_rect = layout.header;
+    if test.started_at.is_none() {
+        painter.text(header_rect.left_center(), egui::Align2::LEFT_CENTER, idle_hint, header_font.clone(), HINT_COLOR);
+    } else if test.finished {
         painter.text(
             header_rect.left_center(),
             egui::Align2::LEFT_CENTER,
@@ -392,8 +470,7 @@ fn draw_screen(
     );
 
     // Word area
-    let words_top = inner.min.y + header_h + HEADER_GAP;
-    let words_rect = egui::Rect::from_min_max(egui::pos2(inner.min.x, words_top), inner.max);
+    let words_rect = egui::Rect::from_min_max(layout.lines_min, layout.lines_max);
 
     let space_w = ui.fonts(|f| f.glyph_width(&font, ' '));
 
@@ -416,14 +493,14 @@ fn draw_screen(
 
     for (wi, word) in test.words.iter().enumerate() {
         let mut word_w = 0.0;
-        for c in word.target.chars() {
+        for (_, c) in word.display_chars() {
             word_w += ui.fonts(|f| f.glyph_width(&font, c));
         }
         if x + word_w > max_w && x > 0.0 {
             line += 1;
             x = 0.0;
         }
-        for (ci, c) in word.target.chars().enumerate() {
+        for (ci, c) in word.display_chars() {
             let cw = ui.fonts(|f| f.glyph_width(&font, c));
             placed.push(PlacedChar { wi, ci, c, line, x, w: cw });
             x += cw;
@@ -462,6 +539,7 @@ fn draw_screen(
             .filter(|p| p.wi == test.current_word && p.ci == typed_count - 1)
             .map(|p| (p.line, p.x + p.w))
             .next()
+            .or(current_word_end)
             .unwrap_or((active_line, 0.0))
     };
     let caret_target = egui::pos2(
@@ -490,16 +568,19 @@ fn draw_screen(
         let is_current = p.wi == test.current_word;
         let typed_here = p.ci < word.typed.chars().count();
 
-        let color = if typed_here {
+        let is_extra = p.ci >= word.target.chars().count();
+        let color = if is_extra {
+            EXTRA_COLOR
+        } else if typed_here {
             match word.states.get(p.ci) {
-                Some(CharState::Correct) => egui::Color32::from_rgb(240, 240, 245),
+                Some(CharState::Correct) => CORRECT_COLOR,
                 Some(CharState::Incorrect) => egui::Color32::from_rgb(235, 70, 70),
                 _ => egui::Color32::from_gray(150),
             }
         } else if is_current {
-            egui::Color32::from_gray(155)
+            CURRENT_WORD_COLOR
         } else {
-            egui::Color32::from_gray(95)
+            UPCOMING_COLOR
         };
 
         let pos = egui::pos2(
@@ -533,5 +614,44 @@ fn draw_screen(
             [caret_now, caret_now + egui::vec2(0.0, line_h)],
             egui::Stroke::new(1.5f32, egui::Color32::WHITE),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_with_first_word(target: &str) -> TestState {
+        let mut t = TestState::new();
+        t.words[0] = TypedWord { target: target.to_string(), states: vec![CharState::Untyped; target.len()], typed: String::new() };
+        t
+    }
+
+    #[test]
+    fn extra_letters_are_displayed_after_the_word() {
+        let mut t = test_with_first_word("the");
+        for c in "thexy".chars() {
+            t.on_char(c);
+        }
+        let shown: String = t.words[0].display_chars().map(|(_, c)| c).collect();
+        assert_eq!(shown, "thexy");
+        assert_eq!(t.words[0].states.len(), 5);
+        assert_eq!(t.words[0].states[3], CharState::Incorrect);
+    }
+
+    #[test]
+    fn extra_letters_are_capped() {
+        let mut t = test_with_first_word("the");
+        for _ in 0..50 {
+            t.on_char('q');
+        }
+        assert_eq!(t.words[0].typed.chars().count(), 3 + MAX_EXTRA_CHARS);
+        assert_eq!(t.total_keystrokes, 3 + MAX_EXTRA_CHARS);
+        // Backspacing all the way still recovers the word.
+        for _ in 0..(3 + MAX_EXTRA_CHARS) {
+            t.on_backspace();
+        }
+        assert!(t.words[0].typed.is_empty());
+        assert_eq!(t.words[0].display_chars().count(), 3);
     }
 }
