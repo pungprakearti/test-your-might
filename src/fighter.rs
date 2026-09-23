@@ -90,11 +90,7 @@ const FRAME_SECS: f64 = 0.2;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Pose {
     Idle,
-    // Not triggered yet - the strike/victory flow is wired up once the
-    // pass/fail rules for the test are defined.
-    #[allow(dead_code)]
     Strike,
-    #[allow(dead_code)]
     Victory,
 }
 
@@ -110,6 +106,12 @@ impl Pose {
 
     fn loops(self) -> bool {
         self == Pose::Idle
+    }
+
+    // Seconds from entering this pose until its last frame shows - for a
+    // strike, the moment of impact.
+    pub fn secs_to_last_frame(self) -> f64 {
+        (self.frames().len() - 1) as f64 * FRAME_SECS
     }
 
     // 0-based frame index to show `elapsed` seconds after entering this pose.
@@ -137,11 +139,12 @@ impl Fighter {
         Self { frames, pose: Pose::Idle, pose_started: now }
     }
 
-    #[allow(dead_code)]
-    pub fn set_pose(&mut self, pose: Pose, now: f64) {
+    // Switches to `pose` as of time `started` (egui input time). No-op if
+    // already in that pose, so it can be called every frame.
+    pub fn set_pose(&mut self, pose: Pose, started: f64) {
         if self.pose != pose {
             self.pose = pose;
-            self.pose_started = now;
+            self.pose_started = started;
         }
     }
 

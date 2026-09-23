@@ -39,7 +39,7 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   182x224 frames 01-09 drawn at native size with the canvas bottom-center on
   `PLAYER1_FOOT`/`PLAYER2_FOOT` (lined up with marker pixels that were in
   `tym-bg.png`). Poses: idle = frames 1-4 looping, strike = 5-7 holding on 7,
-  victory = 8-9 holding on 9; 0.2s per frame. Only idle is used so far.
+  victory = 8-9 holding on 9; 0.2s per frame.
 - Breakable material (`tym-<material>-N.png`, 182x58, currently always
   `tym-wood-1.png` for both players): drawn at native size, full opacity, in
   front of the fighters. Top-left `PLAYER1_MATERIAL` = (36, 119) and
@@ -69,7 +69,13 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   - CPU (player 2) is scripted: it always ends above the bar, except on
     diamond where it never reaches it.
   - Header shows material + goal while typing, then "<MATERIAL> BROKEN!" or
-    "FAILED"; R starts the next round.
+    "FAILED"; R starts the next round (fighters back to idle).
+  - End of round (timer hits 0): both fighters strike (frames 5-7). At impact
+    (frame 7, 0.4s in) each fighter who beat the goal gets the broken slab
+    (`tym-<material>-2.png`), then after a 0.6s beat (`VICTORY_DELAY_SECS`)
+    plays victory (8-9, holding on 9). A fighter who fell short holds on 7
+    with the slab intact. The CPU follows the same rules (fails only on
+    diamond).
   - Saved to `progress.json` (material + every run's wpm/accuracy/target/
     pass/time) in the OS data dir (`directories` crate), or `$TYM_DATA_DIR`.
 - Typing test lives on the Test Your Might screen, on the concrete floor strip
@@ -97,8 +103,6 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
 
 - Three-test average + wood/stone/iron/ruby/diamond tier thresholds, and
   wiring `is_unlocked` up to them plus a played-days tracker for Scorpion.
-- Strike/victory animations and broken-material (`-2`) sprites when a round
-  ends; fighters just idle for now.
 - The `*_placement.png` files are reference art only and aren't drawn.
 - Character-unlock tiers (`WpmTier` in `char_select.rs`, still named
   Wood/Stone/Iron/...) aren't connected to the material progression yet.

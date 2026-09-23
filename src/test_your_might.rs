@@ -6,7 +6,7 @@
 
 use eframe::egui;
 
-use crate::fighter::{Character, Fighter};
+use crate::fighter::{Character, Fighter, Pose};
 use crate::load_texture;
 use crate::progress::{Material, Progress, Run};
 use crate::typing_test::TypingScreen;
@@ -49,6 +49,8 @@ const TARGET_BAR_THICKNESS: f32 = 2.0;
 // How quickly the drawn fill chases the actual speed (per second); higher is
 // snappier, lower is smoother.
 const GAUGE_EASE_RATE: f32 = 8.0;
+// The beat between a slab breaking and the victory animation starting.
+const VICTORY_DELAY_SECS: f64 = 0.6;
 
 // The concrete floor strip the typing test sits on (tym-bg.png pixel
 // coordinates): full width, from just under the 1px highlight line at row 207
@@ -58,8 +60,10 @@ const FLOOR_MAX: egui::Pos2 = egui::pos2(436.0, 291.0);
 
 pub struct TestYourMightScreen {
     tym_bg_texture: Option<egui::TextureHandle>,
-    // tym-<material>-1.png, indexed like Material::ALL.
+    // tym-<material>-1.png (intact) and -2.png (broken), indexed like
+    // Material::ALL.
     material_textures: [Option<egui::TextureHandle>; 5],
+    broken_material_textures: [Option<egui::TextureHandle>; 5],
     gauge_texture: Option<egui::TextureHandle>,
     // (player 1, player 2/CPU); None until a character is confirmed.
     fighters: Option<(Fighter, Fighter)>,
@@ -80,6 +84,38 @@ struct Round {
     cpu: CpuRun,
     // Set once the test finishes and the run has been recorded.
     result: Option<Run>,
+    // egui time the timer ran out, which starts the strike sequence.
+    ended_at: Option<f64>,
+}
+
+// Where one fighter is in the end-of-round sequence: strike when the timer
+// runs out; at the strike's impact (last strike frame) the slab breaks if
+// they were fast enough; a beat later, the victory animation plays. A fighter
+// who fell short holds on the last strike frame.
+#[derive(Debug, PartialEq)]
+struct Ending {
+    pose: Pose,
+    // egui time the pose started, so animations run from the right frame.
+    pose_started: f64,
+    broken: bool,
+    // egui time of this fighter's next change, if any.
+    next_change: Option<f64>,
+}
+
+fn ending_at(ended_at: f64, passed: bool, now: f64) -> Ending {
+    let impact = ended_at + Pose::Strike.secs_to_last_frame();
+    let victory = impact + VICTORY_DELAY_SECS;
+    if passed && now >= victory {
+        Ending { pose: Pose::Victory, pose_started: victory, broken: true, next_change: None }
+    } else {
+        let broken = passed && now >= impact;
+        let next_change = match (passed, broken) {
+            (false, _) => None,
+            (true, false) => Some(impact),
+            (true, true) => Some(victory),
+        };
+        Ending { pose: Pose::Strike, pose_started: ended_at, broken, next_change }
+    }
 }
 
 impl TestYourMightScreen {
@@ -93,12 +129,20 @@ impl TestYourMightScreen {
             load_texture(ctx, "tym-ruby-1", include_bytes!("../assets/tym-ruby-1.png")),
             load_texture(ctx, "tym-diamond-1", include_bytes!("../assets/tym-diamond-1.png")),
         ];
+        let broken_material_textures = [
+            load_texture(ctx, "tym-wood-2", include_bytes!("../assets/tym-wood-2.png")),
+            load_texture(ctx, "tym-stone-2", include_bytes!("../assets/tym-stone-2.png")),
+            load_texture(ctx, "tym-steel-2", include_bytes!("../assets/tym-steel-2.png")),
+            load_texture(ctx, "tym-ruby-2", include_bytes!("../assets/tym-ruby-2.png")),
+            load_texture(ctx, "tym-diamond-2", include_bytes!("../assets/tym-diamond-2.png")),
+        ];
         let gauge_texture = load_texture(ctx, "guage", include_bytes!("../assets/guage.png"));
         let progress = Progress::load();
         let round = Round::new(&progress);
         Self {
             tym_bg_texture,
             material_textures,
+            broken_material_textures,
             gauge_texture,
             fighters: None,
             typing: TypingScreen::new(),
@@ -112,10 +156,14 @@ impl TestYourMightScreen {
     pub fn start_match(&mut self, ctx: &egui::Context, player: Character, now: f64) {
         let cpu = player.random_opponent();
         self.fighters = Some((Fighter::new(ctx, player, now), Fighter::new(ctx, cpu, now)));
-        self.start_round();
+        self.start_round(now);
     }
 
-    fn start_round(&mut self) {
+    fn start_round(&mut self, now: f64) {
+        if let Some((p1, p2)) = &mut self.fighters {
+            p1.set_pose(Pose::Idle, now);
+            p2.set_pose(Pose::Idle, now);
+        }
         self.typing = TypingScreen::new();
         self.round = Round::new(&self.progress);
         self.p1_fill = 0.0;
@@ -123,14 +171,31 @@ impl TestYourMightScreen {
     }
 
     pub fn handle_input(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|i| i.time);
         self.typing.handle_input(ctx);
         if self.typing.finished() && self.round.result.is_none() {
             let run = self.progress.record(self.typing.wpm(), self.typing.accuracy(), self.round.target_wpm);
             self.progress.save();
             self.round.result = Some(run);
+            self.round.ended_at = Some(now);
         } else if self.round.result.is_some() && ctx.input(|i| i.key_pressed(egui::Key::R)) {
-            self.start_round();
+            self.start_round(now);
+            return;
         }
+        if let (Some([p1_end, p2_end]), Some((p1, p2))) = (self.endings(now), &mut self.fighters) {
+            p1.set_pose(p1_end.pose, p1_end.pose_started);
+            p2.set_pose(p2_end.pose, p2_end.pose_started);
+            if let Some(next) = [p1_end.next_change, p2_end.next_change].into_iter().flatten().reduce(f64::min) {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64((next - now).max(0.0)));
+            }
+        }
+    }
+
+    // Each fighter's end-of-round state, once the timer has run out.
+    fn endings(&self, now: f64) -> Option<[Ending; 2]> {
+        let ended_at = self.round.ended_at?;
+        let p1_passed = self.round.result.as_ref().is_some_and(|r| r.passed);
+        Some([ending_at(ended_at, p1_passed, now), ending_at(ended_at, self.round.cpu.passes(), now)])
     }
 
     pub fn dev_type(&mut self, text: &str) {
@@ -211,8 +276,11 @@ impl TestYourMightScreen {
             }
         }
         let material_idx = Material::ALL.iter().position(|&m| m == self.round.material).unwrap();
-        if let Some(tex) = &self.material_textures[material_idx] {
-            for pos in [PLAYER1_MATERIAL, PLAYER2_MATERIAL] {
+        let now = ctx.input(|i| i.time);
+        let broken = self.endings(now).map_or([false, false], |[p1, p2]| [p1.broken, p2.broken]);
+        for (pos, broken) in [(PLAYER1_MATERIAL, broken[0]), (PLAYER2_MATERIAL, broken[1])] {
+            let textures = if broken { &self.broken_material_textures } else { &self.material_textures };
+            if let Some(tex) = &textures[material_idx] {
                 draw_sprite(&painter, tex, at(pos), egui::Color32::WHITE);
             }
         }
@@ -226,7 +294,7 @@ impl TestYourMightScreen {
 impl Round {
     fn new(progress: &Progress) -> Self {
         let material = progress.material;
-        Round { material, target_wpm: progress.target_wpm(), cpu: CpuRun::new(material), result: None }
+        Round { material, target_wpm: progress.target_wpm(), cpu: CpuRun::new(material), result: None, ended_at: None }
     }
 }
 
@@ -265,6 +333,11 @@ impl CpuRun {
         }
     }
 
+    // Whether the CPU's final speed clears the bar (breaks its slab).
+    fn passes(&self) -> bool {
+        self.final_ratio >= 1.0
+    }
+
     // Speed as a multiple of the target, `t` seconds into the test.
     fn ratio_at(&self, t: f64) -> f64 {
         let t = t.clamp(0.0, TEST_SECS);
@@ -299,6 +372,27 @@ mod tests {
     }
 
     #[test]
+    fn ending_strikes_then_breaks_then_celebrates() {
+        let impact = Pose::Strike.secs_to_last_frame();
+        let victory = impact + VICTORY_DELAY_SECS;
+        let at = |t: f64| ending_at(100.0, true, 100.0 + t);
+        assert_eq!(at(0.0), Ending { pose: Pose::Strike, pose_started: 100.0, broken: false, next_change: Some(100.0 + impact) });
+        assert_eq!(at(impact), Ending { pose: Pose::Strike, pose_started: 100.0, broken: true, next_change: Some(100.0 + victory) });
+        assert_eq!(at(victory), Ending { pose: Pose::Victory, pose_started: 100.0 + victory, broken: true, next_change: None });
+        assert_eq!(at(60.0).pose, Pose::Victory);
+    }
+
+    #[test]
+    fn ending_holds_the_strike_when_too_slow() {
+        for t in [0.0, 1.0, 60.0] {
+            assert_eq!(
+                ending_at(100.0, false, 100.0 + t),
+                Ending { pose: Pose::Strike, pose_started: 100.0, broken: false, next_change: None }
+            );
+        }
+    }
+
+    #[test]
     fn cpu_clears_the_bar_except_on_diamond() {
         for _ in 0..200 {
             for m in Material::ALL {
@@ -307,8 +401,10 @@ mod tests {
                 if m == Material::Diamond {
                     let peak = (0..=3000).map(|i| cpu.ratio_at(i as f64 / 100.0)).fold(0.0, f64::max);
                     assert!(peak < 1.0, "diamond CPU must never reach the bar (peak {peak})");
+                    assert!(!cpu.passes());
                 } else {
                     assert!(end > 1.0, "CPU must end above the bar on {m:?} (ended {end})");
+                    assert!(cpu.passes());
                 }
             }
         }
