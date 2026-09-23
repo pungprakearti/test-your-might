@@ -1,10 +1,13 @@
-// Typing test screen: monkeytype-style fixed word stream, per-character
-// correctness tracking, and the 3-line scrolling word view.
+// Typing test: monkeytype-style fixed word stream, per-character correctness
+// tracking, and the 3-line scrolling word view. Drawn by the Test Your Might
+// screen onto the 436x83 concrete floor strip, so the layout is compact.
 
 use eframe::egui;
 use std::time::{Duration, Instant};
 
 const TEST_DURATION: Duration = Duration::from_secs(30);
+// Window for the "current speed" reading that drives the gauge.
+const LIVE_WINDOW_SECS: f64 = 3.0;
 
 const WORDS: &[&str] = &[
     "the", "of", "and", "to", "in", "is", "you", "that", "it", "he", "was", "for", "on", "are",
@@ -32,6 +35,9 @@ struct TypedWord {
 }
 
 struct TestState {
+    // Unique per test, so per-letter animation state from a previous test
+    // (egui keys it by id) doesn't carry over and suppress the pop-in.
+    id: u64,
     words: Vec<TypedWord>,
     current_word: usize,
     started_at: Option<Instant>,
@@ -41,11 +47,16 @@ struct TestState {
     correct_keystrokes: usize,
     finished: bool,
     final_elapsed: Option<Duration>,
+    // (seconds since start, correct_chars) after every change, for the
+    // rolling live-speed reading.
+    samples: Vec<(f64, usize)>,
 }
 
 impl TestState {
     fn new() -> Self {
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         Self {
+            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             words: Self::gen_words(60),
             current_word: 0,
             started_at: None,
@@ -55,6 +66,7 @@ impl TestState {
             correct_keystrokes: 0,
             finished: false,
             final_elapsed: None,
+            samples: Vec::new(),
         }
     }
 
@@ -98,6 +110,11 @@ impl TestState {
         if self.started_at.is_none() {
             self.started_at = Some(Instant::now());
         }
+        self.apply_char(c);
+        self.samples.push((self.elapsed().as_secs_f64(), self.correct_chars));
+    }
+
+    fn apply_char(&mut self, c: char) {
         if c == ' ' {
             self.commit_word();
             return;
@@ -157,6 +174,7 @@ impl TestState {
             }
             let _ = c;
         }
+        self.samples.push((self.elapsed().as_secs_f64(), self.correct_chars));
     }
 
     fn commit_word(&mut self) {
@@ -195,6 +213,31 @@ impl TestState {
         (self.correct_chars as f64 / 5.0) / mins
     }
 
+    // WPM over just the last LIVE_WINDOW_SECS (always divided by the full
+    // window, so it charges up from 0 over the first few seconds instead of
+    // spiking on the first word).
+    fn rolling_wpm(&self) -> f64 {
+        let now = self.final_elapsed.unwrap_or_else(|| self.elapsed()).as_secs_f64();
+        let then = now - LIVE_WINDOW_SECS;
+        let chars_then = self.samples.iter().rev().find(|(t, _)| *t <= then).map(|&(_, c)| c).unwrap_or(0);
+        let chars = self.correct_chars.saturating_sub(chars_then);
+        (chars as f64 / 5.0) / (LIVE_WINDOW_SECS / 60.0)
+    }
+
+    // How far through the test we are, 0..=1.
+    fn progress(&self) -> f64 {
+        (self.final_elapsed.unwrap_or_else(|| self.elapsed()).as_secs_f64() / TEST_DURATION.as_secs_f64()).min(1.0)
+    }
+
+    // The speed shown on the gauge: early on it follows the rolling current
+    // speed, and it blends steadily toward the overall test WPM as the test
+    // goes on, landing exactly on the final WPM (the pass/fail number) at the
+    // end.
+    fn live_wpm(&self) -> f64 {
+        let t = self.progress();
+        self.rolling_wpm() * (1.0 - t) + self.wpm() * t
+    }
+
     fn accuracy(&self) -> f64 {
         if self.total_keystrokes == 0 {
             return 100.0;
@@ -211,6 +254,23 @@ pub struct TypingScreen {
 impl TypingScreen {
     pub fn new() -> Self {
         Self { test: TestState::new(), caret_pos: None }
+    }
+
+    // Feeds text straight into the test as if typed (dev hook).
+    pub fn type_text(&mut self, text: &str) {
+        for c in text.chars() {
+            self.test.on_char(c);
+        }
+    }
+
+    // Correctly types the first `n` words of the test, each followed by a
+    // space (dev hook).
+    pub fn type_words(&mut self, n: usize) {
+        for _ in 0..n {
+            let word = self.test.words[self.test.current_word].target.clone();
+            self.type_text(&word);
+            self.type_text(" ");
+        }
     }
 
     pub fn handle_input(&mut self, ctx: &egui::Context) {
@@ -233,23 +293,50 @@ impl TypingScreen {
                     }
                 }
             });
-        } else {
-            let restart = ctx.input(|i| i.key_pressed(egui::Key::R));
-            if restart {
-                self.test = TestState::new();
-                self.caret_pos = None;
-            }
         }
     }
 
-    pub fn draw(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, rect: egui::Rect) {
+    pub fn started(&self) -> bool {
+        self.test.started_at.is_some()
+    }
+
+    pub fn finished(&self) -> bool {
+        self.test.finished
+    }
+
+    // Seconds since the first keypress (frozen at the test length once done).
+    pub fn elapsed_secs(&self) -> f64 {
+        self.test.final_elapsed.unwrap_or_else(|| self.test.elapsed()).as_secs_f64()
+    }
+
+    pub fn wpm(&self) -> f64 {
+        self.test.wpm()
+    }
+
+    pub fn accuracy(&self) -> f64 {
+        self.test.accuracy()
+    }
+
+    pub fn live_wpm(&self) -> f64 {
+        self.test.live_wpm()
+    }
+
+    // `status` is shown right-aligned in the header row.
+    pub fn draw(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, rect: egui::Rect, status: &str) {
         let dt = ctx.input(|i| i.stable_dt);
-        draw_screen(ui, &self.test, rect, &mut self.caret_pos, dt);
+        draw_screen(ui, &self.test, rect, &mut self.caret_pos, dt, status);
     }
 }
 
 const VISIBLE_LINES: usize = 3;
-const LINE_GAP: f32 = 6.0;
+const LINE_GAP: f32 = 2.0;
+const PAD_X: f32 = 8.0;
+const HEADER_FONT: f32 = 12.0;
+const HEADER_GAP: f32 = 2.0;
+const WORD_FONT: f32 = 14.0;
+// Dark wash over the concrete so the gray untyped words stay readable while
+// the floor texture still shows through.
+const BACKDROP_ALPHA: u8 = 150;
 const POP_IN_SECS: f32 = 0.12;
 const POP_RISE: f32 = 5.0;
 
@@ -259,23 +346,30 @@ fn draw_screen(
     rect: egui::Rect,
     caret_pos: &mut Option<egui::Pos2>,
     dt: f32,
+    status: &str,
 ) {
     let ctx = ui.ctx().clone();
     let painter = ui.painter();
-    painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(20, 22, 30));
+    painter.rect_filled(rect, 0.0, egui::Color32::from_black_alpha(BACKDROP_ALPHA));
 
-    let pad = 10.0;
-    let inner = rect.shrink(pad);
+    // Header row + 3 word lines, centered vertically in the strip.
+    let header_font = egui::FontId::monospace(HEADER_FONT);
+    let header_h = ui.fonts(|f| f.row_height(&header_font));
+    let font = egui::FontId::monospace(WORD_FONT);
+    let line_h = ui.fonts(|f| f.row_height(&font));
+    let content_h =
+        header_h + HEADER_GAP + VISIBLE_LINES as f32 * line_h + (VISIBLE_LINES - 1) as f32 * LINE_GAP;
+    let top = (rect.center().y - content_h / 2.0).round();
+    let inner = egui::Rect::from_x_y_ranges(rect.min.x + PAD_X..=rect.max.x - PAD_X, top..=top + content_h);
 
     // Header: timer / results
-    let header_h = 28.0;
     let header_rect = egui::Rect::from_min_size(inner.min, egui::vec2(inner.width(), header_h));
     if test.finished {
         painter.text(
             header_rect.left_center(),
             egui::Align2::LEFT_CENTER,
-            format!("WPM {:.0}   ACC {:.0}%   (press R)", test.wpm(), test.accuracy()),
-            egui::FontId::monospace(16.0),
+            format!("WPM {:.0}   ACC {:.0}%", test.wpm(), test.accuracy()),
+            header_font.clone(),
             egui::Color32::from_rgb(120, 220, 140),
         );
     } else {
@@ -284,18 +378,24 @@ fn draw_screen(
             header_rect.left_center(),
             egui::Align2::LEFT_CENTER,
             format!("{:>2}s   wpm {:.0}", secs_left, test.wpm()),
-            egui::FontId::monospace(16.0),
+            header_font.clone(),
             egui::Color32::from_rgb(200, 200, 210),
         );
     }
 
+    painter.text(
+        header_rect.right_center(),
+        egui::Align2::RIGHT_CENTER,
+        status,
+        header_font.clone(),
+        egui::Color32::from_rgb(240, 200, 40),
+    );
+
     // Word area
-    let words_top = inner.min.y + header_h + 6.0;
+    let words_top = inner.min.y + header_h + HEADER_GAP;
     let words_rect = egui::Rect::from_min_max(egui::pos2(inner.min.x, words_top), inner.max);
 
-    let font = egui::FontId::monospace(15.0);
     let space_w = ui.fonts(|f| f.glyph_width(&font, ' '));
-    let line_h = ui.fonts(|f| f.row_height(&font));
 
     // --- Layout pass: figure out which line each word falls on, without
     // drawing anything yet, so we know which lines are visible and where the
@@ -410,7 +510,7 @@ fn draw_screen(
         if typed_here {
             // Pop each newly-typed letter in: it eases up from slightly below
             // and fades in, instead of snapping into place.
-            let anim_id = egui::Id::new(("char-pop", p.wi, p.ci));
+            let anim_id = egui::Id::new(("char-pop", test.id, p.wi, p.ci));
             let t = ctx.animate_value_with_time(anim_id, 1.0, POP_IN_SECS);
             let eased = 1.0 - (1.0 - t) * (1.0 - t);
             let offset_y = (1.0 - eased) * POP_RISE;

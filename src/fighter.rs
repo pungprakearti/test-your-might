@@ -32,7 +32,7 @@ impl Character {
         Character::SubZero,
     ];
 
-    fn sprite_prefix(self) -> &'static str {
+    pub fn sprite_prefix(self) -> &'static str {
         match self {
             Character::JohnnyCage => "johnny_cage",
             Character::Kano => "kano",

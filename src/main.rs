@@ -1,11 +1,14 @@
 // Test Your Might - arcade cabinet app scaffold.
 // Window is fixed at 500x700 to match mk-cabinet.png. Each screen (character
-// select, test-your-might, typing test) renders only inside the cabinet's
-// "screen" rect of that image: (32,151) -> (467,441) inclusive, 436x291. See char_select.rs,
-// test_your_might.rs, and typing_test.rs for the individual screens.
+// select, then Test Your Might with the typing test on its floor) renders only
+// inside the cabinet's "screen" rect of that image: (32,151) -> (467,441)
+// inclusive, 436x291. See char_select.rs, test_your_might.rs, and
+// typing_test.rs for the individual screens.
 
 mod char_select;
+mod dev;
 mod fighter;
+mod progress;
 mod test_your_might;
 mod typing_test;
 
@@ -14,7 +17,6 @@ use std::time::Duration;
 
 use char_select::CharSelectScreen;
 use test_your_might::TestYourMightScreen;
-use typing_test::TypingScreen;
 
 const WINDOW_W: f32 = 500.0;
 const WINDOW_H: f32 = 700.0;
@@ -30,10 +32,6 @@ const SCREEN_MAX: egui::Pos2 = egui::pos2(468.0, 442.0);
 enum Screen {
     CharSelect,
     TestYourMight,
-    // Not reachable yet - nothing transitions here until the Test Your Might
-    // minigame is built to hand off into the typing test.
-    #[allow(dead_code)]
-    Typing,
 }
 
 pub(crate) fn load_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::TextureHandle> {
@@ -49,19 +47,30 @@ struct App {
     screen: Screen,
     char_select: CharSelectScreen,
     test_your_might: TestYourMightScreen,
-    typing: TypingScreen,
+    dev_screenshot: dev::Screenshot,
 }
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let bg_texture = load_texture(&cc.egui_ctx, "cabinet-bg", include_bytes!("../assets/mk-cabinet.png"));
-        Self {
+        let mut app = Self {
             bg_texture,
             screen: Screen::CharSelect,
             char_select: CharSelectScreen::new(cc),
             test_your_might: TestYourMightScreen::new(cc),
-            typing: TypingScreen::new(),
+            dev_screenshot: dev::Screenshot::from_env(),
+        };
+        if let Some(character) = dev::start_character() {
+            app.test_your_might.start_match(&cc.egui_ctx, character, 0.0);
+            app.screen = Screen::TestYourMight;
         }
+        if let Some(text) = dev::typed_text() {
+            app.test_your_might.dev_type(&text);
+        }
+        if let Some(n) = dev::typed_words() {
+            app.test_your_might.dev_type_words(n);
+        }
+        app
     }
 }
 
@@ -76,9 +85,8 @@ impl eframe::App for App {
                     self.screen = Screen::TestYourMight;
                 }
             }
-            Screen::TestYourMight => {}
-            Screen::Typing => {
-                self.typing.handle_input(ctx);
+            Screen::TestYourMight => {
+                self.test_your_might.handle_input(ctx);
             }
         }
         ctx.request_repaint_after(Duration::from_millis(100));
@@ -105,9 +113,6 @@ impl eframe::App for App {
                     }
                     Screen::TestYourMight => {
                         self.test_your_might.draw(&mut screen_ui, ctx, screen_rect);
-                    }
-                    Screen::Typing => {
-                        self.typing.draw(&mut screen_ui, ctx, screen_rect);
                     }
                 }
 
@@ -144,6 +149,7 @@ impl eframe::App for App {
                     }
                 }
             });
+        self.dev_screenshot.update(ctx);
     }
 }
 

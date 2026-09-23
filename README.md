@@ -14,6 +14,11 @@ Not a serious product, just a hobby project.
   materials), all embedded in the binary via `include_bytes!`.
 - **rand** - picks words for the typing test and the CPU opponent.
 
+Progress (current material and every run's WPM/accuracy) is saved to
+`progress.json` in the OS data directory, e.g.
+`%APPDATA%\test-your-might\data\` on Windows or
+`~/.local/share/test-your-might/` on Linux.
+
 The window is a fixed 500x700, undecorated, always-on-top, and draggable by
 clicking the cabinet art outside the screen area.
 

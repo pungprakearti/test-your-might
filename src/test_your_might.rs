@@ -1,12 +1,15 @@
 // "Test Your Might" screen: the slab-break minigame backdrop, with the two
 // fighter foot-anchor spots (player 1 / player 2-CPU) confirmed via the
 // Johnny Cage and Sonya Blade placement sprites. Player 1 is the character
-// picked on the select screen; player 2 is a random different character.
+// picked on the select screen; player 2 is a random different character. The
+// typing test runs on the concrete floor strip along the bottom.
 
 use eframe::egui;
 
 use crate::fighter::{Character, Fighter};
 use crate::load_texture;
+use crate::progress::{Material, Progress, Run};
+use crate::typing_test::TypingScreen;
 
 // Fighter foot-anchor points on this screen (bottom-center, in tym-bg.png
 // pixel coordinates). Every character drawn here uses one of these two spots
@@ -16,61 +19,297 @@ pub const PLAYER1_FOOT: egui::Pos2 = egui::pos2(126.0, 219.0);
 pub const PLAYER2_FOOT: egui::Pos2 = egui::pos2(297.0, 219.0);
 
 // Top-left of each player's breakable material (tym-bg.png pixel
-// coordinates). Each lines up exactly with a 182x58 green bracket box baked
-// into tym-bg.png - P1 (36,119)-(217,176), P2 (210,119)-(391,176) inclusive -
+// coordinates). Each lines up exactly with a 182x58 green bracket box that
+// was marked in tym-bg.png (markers since removed; see v0.0.9 in git) - P1 (36,119)-(217,176), P2 (210,119)-(391,176) inclusive -
 // which matches the size of material-placement.png and the tym-<material>-N.png
 // sprites. Confirmed correct by the user for both players. Drawn at native
 // size (never resized), in front of the fighters.
 pub const PLAYER1_MATERIAL: egui::Pos2 = egui::pos2(36.0, 119.0);
 pub const PLAYER2_MATERIAL: egui::Pos2 = egui::pos2(210.0, 119.0);
 
+// Top-left of each player's gauge (tym-bg.png pixel coordinates), one on the
+// outer side of each fighter. Each lines up exactly with a 33x170 box of
+// orange-red corner markers that were in tym-bg.png (since removed) - P1 (39,2)-(71,171), P2
+// (364,2)-(396,171) inclusive - which matches guage.png's size. Drawn at
+// native size, behind the fighters. Placement confirmed by the user.
+pub const PLAYER1_GAUGE: egui::Pos2 = egui::pos2(39.0, 2.0);
+pub const PLAYER2_GAUGE: egui::Pos2 = egui::pos2(364.0, 2.0);
+
+// The gauge's see-through window, in guage.png pixel coordinates: 25x160
+// inside the 4px frame (5px at the top/bottom edges). The yellow speed fill
+// is drawn behind the gauge inside this window, rising from the bottom, and
+// is clamped to it.
+const GAUGE_WINDOW_MIN: egui::Pos2 = egui::pos2(4.0, 5.0);
+const GAUGE_WINDOW_SIZE: egui::Vec2 = egui::vec2(25.0, 160.0);
+const GAUGE_FILL_COLOR: egui::Color32 = egui::Color32::from_rgb(248, 216, 0);
+// The red target line: drawn on top of the gauge, across its full width, at
+// the current material's bar height.
+const TARGET_BAR_COLOR: egui::Color32 = egui::Color32::from_rgb(230, 30, 30);
+const TARGET_BAR_THICKNESS: f32 = 2.0;
+// How quickly the drawn fill chases the actual speed (per second); higher is
+// snappier, lower is smoother.
+const GAUGE_EASE_RATE: f32 = 8.0;
+
+// The concrete floor strip the typing test sits on (tym-bg.png pixel
+// coordinates): full width, from just under the 1px highlight line at row 207
+// down to the bottom edge - 436x83.
+const FLOOR_MIN: egui::Pos2 = egui::pos2(0.0, 208.0);
+const FLOOR_MAX: egui::Pos2 = egui::pos2(436.0, 291.0);
+
 pub struct TestYourMightScreen {
     tym_bg_texture: Option<egui::TextureHandle>,
-    material_texture: Option<egui::TextureHandle>,
+    // tym-<material>-1.png, indexed like Material::ALL.
+    material_textures: [Option<egui::TextureHandle>; 5],
+    gauge_texture: Option<egui::TextureHandle>,
     // (player 1, player 2/CPU); None until a character is confirmed.
     fighters: Option<(Fighter, Fighter)>,
+    typing: TypingScreen,
+    progress: Progress,
+    round: Round,
+    // Currently drawn gauge fills (fraction of the window height), eased
+    // toward the real values each frame.
+    p1_fill: f32,
+    p2_fill: f32,
+}
+
+// One 30s test: what's being broken, the target it was set with, and how the
+// CPU's gauge will play out.
+struct Round {
+    material: Material,
+    target_wpm: f64,
+    cpu: CpuRun,
+    // Set once the test finishes and the run has been recorded.
+    result: Option<Run>,
 }
 
 impl TestYourMightScreen {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let tym_bg_texture = load_texture(&cc.egui_ctx, "tym-bg", include_bytes!("../assets/tym-bg.png"));
-        let material_texture = load_texture(&cc.egui_ctx, "tym-wood-1", include_bytes!("../assets/tym-wood-1.png"));
-        Self { tym_bg_texture, material_texture, fighters: None }
+        let ctx = &cc.egui_ctx;
+        let tym_bg_texture = load_texture(ctx, "tym-bg", include_bytes!("../assets/tym-bg.png"));
+        let material_textures = [
+            load_texture(ctx, "tym-wood-1", include_bytes!("../assets/tym-wood-1.png")),
+            load_texture(ctx, "tym-stone-1", include_bytes!("../assets/tym-stone-1.png")),
+            load_texture(ctx, "tym-steel-1", include_bytes!("../assets/tym-steel-1.png")),
+            load_texture(ctx, "tym-ruby-1", include_bytes!("../assets/tym-ruby-1.png")),
+            load_texture(ctx, "tym-diamond-1", include_bytes!("../assets/tym-diamond-1.png")),
+        ];
+        let gauge_texture = load_texture(ctx, "guage", include_bytes!("../assets/guage.png"));
+        let progress = Progress::load();
+        let round = Round::new(&progress);
+        Self {
+            tym_bg_texture,
+            material_textures,
+            gauge_texture,
+            fighters: None,
+            typing: TypingScreen::new(),
+            progress,
+            round,
+            p1_fill: 0.0,
+            p2_fill: 0.0,
+        }
     }
 
     pub fn start_match(&mut self, ctx: &egui::Context, player: Character, now: f64) {
         let cpu = player.random_opponent();
         self.fighters = Some((Fighter::new(ctx, player, now), Fighter::new(ctx, cpu, now)));
+        self.start_round();
     }
 
-    pub fn draw(&self, ui: &mut egui::Ui, ctx: &egui::Context, screen_rect: egui::Rect) {
-        if let Some(tex) = &self.tym_bg_texture {
-            ui.painter().image(
-                tex.id(),
-                screen_rect,
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
+    fn start_round(&mut self) {
+        self.typing = TypingScreen::new();
+        self.round = Round::new(&self.progress);
+        self.p1_fill = 0.0;
+        self.p2_fill = 0.0;
+    }
+
+    pub fn handle_input(&mut self, ctx: &egui::Context) {
+        self.typing.handle_input(ctx);
+        if self.typing.finished() && self.round.result.is_none() {
+            let run = self.progress.record(self.typing.wpm(), self.typing.accuracy(), self.round.target_wpm);
+            self.progress.save();
+            self.round.result = Some(run);
+        } else if self.round.result.is_some() && ctx.input(|i| i.key_pressed(egui::Key::R)) {
+            self.start_round();
         }
+    }
+
+    pub fn dev_type(&mut self, text: &str) {
+        self.typing.type_text(text);
+    }
+
+    pub fn dev_type_words(&mut self, n: usize) {
+        self.typing.type_words(n);
+    }
+
+    // Player 1's and the CPU's speed as a multiple of the target (1.0 = right
+    // on the red bar).
+    fn speed_ratios(&self) -> (f64, f64) {
+        if !self.typing.started() {
+            return (0.0, 0.0);
+        }
+        // Once done, show the whole-number WPM that pass/fail was judged on.
+        let p1_wpm = if self.typing.finished() { self.typing.wpm().round() } else { self.typing.live_wpm() };
+        (p1_wpm / self.round.target_wpm, self.round.cpu.ratio_at(self.typing.elapsed_secs()))
+    }
+
+    fn status_text(&self) -> String {
+        let material = self.round.material.label();
+        match &self.round.result {
+            None => format!("{material}  goal {:.0}", self.round.target_wpm),
+            Some(run) if run.passed => format!("{material} BROKEN!  (R)"),
+            Some(_) => "FAILED  (R)".to_string(),
+        }
+    }
+
+    // Layers, back to front: background, gauge fills, gauges + target bars,
+    // fighters, materials, typing test.
+    pub fn draw(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, screen_rect: egui::Rect) {
+        let painter = ui.painter().clone();
+        let at = |pos: egui::Pos2| screen_rect.min + pos.to_vec2();
+        if let Some(tex) = &self.tym_bg_texture {
+            draw_sprite(&painter, tex, screen_rect.min, egui::Color32::WHITE);
+        }
+
+        let bar = self.round.material.bar_fraction();
+        let (p1_ratio, p2_ratio) = self.speed_ratios();
+        let ease = 1.0 - (-ctx.input(|i| i.stable_dt) * GAUGE_EASE_RATE).exp();
+        self.p1_fill += (fill_fraction(p1_ratio, bar) - self.p1_fill) * ease;
+        self.p2_fill += (fill_fraction(p2_ratio, bar) - self.p2_fill) * ease;
+        let settled = (fill_fraction(p1_ratio, bar) - self.p1_fill).abs() < 0.001
+            && (fill_fraction(p2_ratio, bar) - self.p2_fill).abs() < 0.001;
+        if (self.typing.started() && !self.typing.finished()) || !settled {
+            ctx.request_repaint();
+        }
+        for (pos, fill) in [(PLAYER1_GAUGE, self.p1_fill), (PLAYER2_GAUGE, self.p2_fill)] {
+            let window = egui::Rect::from_min_size(at(pos) + GAUGE_WINDOW_MIN.to_vec2(), GAUGE_WINDOW_SIZE);
+            let h = (fill * GAUGE_WINDOW_SIZE.y).round();
+            if h > 0.0 {
+                let fill_rect = egui::Rect::from_min_max(egui::pos2(window.min.x, window.max.y - h), window.max);
+                painter.rect_filled(fill_rect, 0.0, GAUGE_FILL_COLOR);
+            }
+        }
+        if let Some(tex) = &self.gauge_texture {
+            for pos in [PLAYER1_GAUGE, PLAYER2_GAUGE] {
+                draw_sprite(&painter, tex, at(pos), egui::Color32::WHITE);
+                let window_bottom = at(pos).y + GAUGE_WINDOW_MIN.y + GAUGE_WINDOW_SIZE.y;
+                let bar_y = (window_bottom - bar * GAUGE_WINDOW_SIZE.y).round();
+                let bar_rect = egui::Rect::from_min_max(
+                    egui::pos2(at(pos).x, bar_y - TARGET_BAR_THICKNESS / 2.0),
+                    egui::pos2(at(pos).x + tex.size_vec2().x, bar_y + TARGET_BAR_THICKNESS / 2.0),
+                );
+                painter.rect_filled(bar_rect, 0.0, TARGET_BAR_COLOR);
+            }
+        }
+
         if let Some((p1, p2)) = &self.fighters {
             let now = ctx.input(|i| i.time);
-            let painter = ui.painter();
-            p1.draw(painter, screen_rect.min + PLAYER1_FOOT.to_vec2(), now);
-            p2.draw(painter, screen_rect.min + PLAYER2_FOOT.to_vec2(), now);
-            if let Some(tex) = &self.material_texture {
-                for pos in [PLAYER1_MATERIAL, PLAYER2_MATERIAL] {
-                    let rect = egui::Rect::from_min_size(screen_rect.min + pos.to_vec2(), tex.size_vec2());
-                    painter.image(
-                        tex.id(),
-                        rect,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        egui::Color32::WHITE,
-                    );
-                }
-            }
+            p1.draw(&painter, at(PLAYER1_FOOT), now);
+            p2.draw(&painter, at(PLAYER2_FOOT), now);
             let next = [p1.next_frame_in(now), p2.next_frame_in(now)].into_iter().flatten().reduce(f64::min);
             if let Some(secs) = next {
                 ctx.request_repaint_after(std::time::Duration::from_secs_f64(secs));
+            }
+        }
+        let material_idx = Material::ALL.iter().position(|&m| m == self.round.material).unwrap();
+        if let Some(tex) = &self.material_textures[material_idx] {
+            for pos in [PLAYER1_MATERIAL, PLAYER2_MATERIAL] {
+                draw_sprite(&painter, tex, at(pos), egui::Color32::WHITE);
+            }
+        }
+
+        let floor = egui::Rect::from_min_max(at(FLOOR_MIN), at(FLOOR_MAX));
+        let status = self.status_text();
+        self.typing.draw(ui, ctx, floor, &status);
+    }
+}
+
+impl Round {
+    fn new(progress: &Progress) -> Self {
+        let material = progress.material;
+        Round { material, target_wpm: progress.target_wpm(), cpu: CpuRun::new(material), result: None }
+    }
+}
+
+// Gauge fill (fraction of the window height) for a speed `ratio` of the
+// target, with the target drawn at `bar` - so ratio 1.0 lands exactly on the
+// red bar. Never leaves the gauge.
+fn fill_fraction(ratio: f64, bar: f32) -> f32 {
+    (ratio as f32 * bar).clamp(0.0, 1.0)
+}
+
+// The CPU's scripted gauge for one round. It always clears the bar, except on
+// diamond, where it always falls short.
+struct CpuRun {
+    final_ratio: f64,
+    wobble_hz: f64,
+    wobble_phase: f64,
+}
+
+// The CPU's speed wobbles by up to this fraction, fading out by the end.
+const CPU_WOBBLE: f64 = 0.12;
+// Seconds for the CPU gauge to charge up at the start, like the player's.
+const CPU_RAMP_SECS: f64 = 3.0;
+const TEST_SECS: f64 = 30.0;
+
+impl CpuRun {
+    fn new(material: Material) -> Self {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        // Diamond range tops out low enough that even the peak wobble stays
+        // under the bar: 0.85 * (1 + CPU_WOBBLE) < 1.
+        let final_ratio = if material == Material::Diamond { rng.gen_range(0.70..0.85) } else { rng.gen_range(1.15..1.5) };
+        CpuRun {
+            final_ratio,
+            wobble_hz: rng.gen_range(0.15..0.3),
+            wobble_phase: rng.gen_range(0.0..std::f64::consts::TAU),
+        }
+    }
+
+    // Speed as a multiple of the target, `t` seconds into the test.
+    fn ratio_at(&self, t: f64) -> f64 {
+        let t = t.clamp(0.0, TEST_SECS);
+        let ramp = (t / CPU_RAMP_SECS).min(1.0);
+        let wobble = CPU_WOBBLE * (1.0 - t / TEST_SECS) * (std::f64::consts::TAU * self.wobble_hz * t + self.wobble_phase).sin();
+        self.final_ratio * ramp * (1.0 + wobble)
+    }
+}
+
+// Draws `tex` at its native pixel size (never resized) with its top-left at
+// `min`, in screen coordinates.
+fn draw_sprite(painter: &egui::Painter, tex: &egui::TextureHandle, min: egui::Pos2, tint: egui::Color32) {
+    painter.image(
+        tex.id(),
+        egui::Rect::from_min_size(min, tex.size_vec2()),
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+        tint,
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fill_hits_the_bar_at_target_speed_and_stays_in_the_gauge() {
+        for m in Material::ALL {
+            assert_eq!(fill_fraction(1.0, m.bar_fraction()), m.bar_fraction());
+            assert_eq!(fill_fraction(100.0, m.bar_fraction()), 1.0);
+            assert_eq!(fill_fraction(-1.0, m.bar_fraction()), 0.0);
+        }
+    }
+
+    #[test]
+    fn cpu_clears_the_bar_except_on_diamond() {
+        for _ in 0..200 {
+            for m in Material::ALL {
+                let cpu = CpuRun::new(m);
+                let end = cpu.ratio_at(TEST_SECS);
+                if m == Material::Diamond {
+                    let peak = (0..=3000).map(|i| cpu.ratio_at(i as f64 / 100.0)).fold(0.0, f64::max);
+                    assert!(peak < 1.0, "diamond CPU must never reach the bar (peak {peak})");
+                } else {
+                    assert!(end > 1.0, "CPU must end above the bar on {m:?} (ended {end})");
+                }
             }
         }
     }
