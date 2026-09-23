@@ -4,6 +4,7 @@
 
 use eframe::egui;
 
+use crate::fighter::Character;
 use crate::load_texture;
 
 // WPM tiers a character can unlock at, as a fraction of the player's average
@@ -42,8 +43,7 @@ fn is_unlocked(cond: UnlockCondition) -> bool {
 // cross shape: row 0 has 4 portraits (cols 1,2,4,5 - col 3 is the dragon
 // logo and isn't selectable), row 1 has 3 portraits (cols 2,3,4).
 struct CharCell {
-    #[allow(dead_code)]
-    name: &'static str,
+    character: Character,
     center: egui::Pos2,
     row: u8,
     unlock: UnlockCondition,
@@ -56,13 +56,13 @@ impl CharCell {
 }
 
 const CHAR_CELLS: [CharCell; 7] = [
-    CharCell { name: "Johnny Cage", center: egui::pos2(80.0, 98.5), row: 0, unlock: UnlockCondition::WpmTier(WpmTier::Wood) },
-    CharCell { name: "Kano", center: egui::pos2(149.0, 98.5), row: 0, unlock: UnlockCondition::WpmTier(WpmTier::Stone) },
-    CharCell { name: "Scorpion", center: egui::pos2(282.5, 98.5), row: 0, unlock: UnlockCondition::PlayedDays(10) },
-    CharCell { name: "Sonya Blade", center: egui::pos2(349.5, 98.5), row: 0, unlock: UnlockCondition::WpmTier(WpmTier::Ruby) },
-    CharCell { name: "Raiden", center: egui::pos2(149.0, 181.0), row: 1, unlock: UnlockCondition::WpmTier(WpmTier::Iron) },
-    CharCell { name: "Liu Kang", center: egui::pos2(216.5, 181.0), row: 1, unlock: UnlockCondition::Default },
-    CharCell { name: "Sub-Zero", center: egui::pos2(282.5, 181.0), row: 1, unlock: UnlockCondition::WpmTier(WpmTier::Diamond) },
+    CharCell { character: Character::JohnnyCage, center: egui::pos2(80.0, 98.5), row: 0, unlock: UnlockCondition::WpmTier(WpmTier::Wood) },
+    CharCell { character: Character::Kano, center: egui::pos2(149.0, 98.5), row: 0, unlock: UnlockCondition::WpmTier(WpmTier::Stone) },
+    CharCell { character: Character::Scorpion, center: egui::pos2(282.5, 98.5), row: 0, unlock: UnlockCondition::PlayedDays(10) },
+    CharCell { character: Character::SonyaBlade, center: egui::pos2(349.5, 98.5), row: 0, unlock: UnlockCondition::WpmTier(WpmTier::Ruby) },
+    CharCell { character: Character::Raiden, center: egui::pos2(149.0, 181.0), row: 1, unlock: UnlockCondition::WpmTier(WpmTier::Iron) },
+    CharCell { character: Character::LiuKang, center: egui::pos2(216.5, 181.0), row: 1, unlock: UnlockCondition::Default },
+    CharCell { character: Character::SubZero, center: egui::pos2(282.5, 181.0), row: 1, unlock: UnlockCondition::WpmTier(WpmTier::Diamond) },
 ];
 
 const ROW0: [usize; 4] = [0, 1, 2, 3];
@@ -133,6 +133,10 @@ impl CharSelectScreen {
             selected: 0,
             confirmed: false,
         }
+    }
+
+    pub fn selected_character(&self) -> Character {
+        CHAR_CELLS[self.selected].character
     }
 
     pub fn handle_input(&mut self, ctx: &egui::Context) {

@@ -12,7 +12,8 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   not yet hooked up).
 - Window is fixed at 500x700 to match `assets/mk-cabinet.png`.
 - The typing test only renders inside the cabinet's "screen" rect:
-  `(32, 151)` to `(467, 441)` (measured from the PNG, see git history of
+  `(32, 151)` to `(467, 441)` inclusive = 436x291, same size as the screen
+  art so it draws 1:1 (measured from the PNG, see git history of
   `src/main.rs` for the flood-fill measurement approach).
 - GUI stack: `eframe`/`egui` (glow backend). Window is undecorated,
   always-on-top, draggable by clicking the cabinet art outside the screen,
@@ -29,6 +30,19 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
 - Code layout: `src/main.rs` holds the window/cabinet shell and screen
   routing; each screen lives in its own module (`char_select.rs`,
   `test_your_might.rs`, `typing_test.rs`) with `handle_input`/`draw`.
+  `fighter.rs` holds the `Character` enum, sprite loading, and pose frames.
+- Fighters: confirming a character starts a match with that character as
+  player 1 and a random *different* character as player 2/CPU. Sprites are
+  182x224 frames 01-09 drawn at native size with the canvas bottom-center on
+  `PLAYER1_FOOT`/`PLAYER2_FOOT` (lines up with the marker pixels baked into
+  `tym-bg.png`). Poses: idle = frames 1-4 looping, strike = 5-7 holding on 7,
+  victory = 8-9 holding on 9; 0.2s per frame. Only idle is used so far.
+- Breakable material (`tym-<material>-N.png`, 182x58, currently always
+  `tym-wood-1.png` for both players): drawn at native size, full opacity, in
+  front of the fighters. Top-left `PLAYER1_MATERIAL` = (36, 119) and
+  `PLAYER2_MATERIAL` = (210, 119), in `tym-bg.png` pixel coords (both
+  user-confirmed) - each exactly fills one of the green bracket boxes baked
+  into `tym-bg.png` (found via `material-placement.png`).
 - App now opens on a character select screen (`cs-background.png` drawn over
   the cabinet screen rect) instead of straight into the typing test. A
   green-frame selector (`cs-selected-1.png`/`cs-selected-2.png`) blinks every
@@ -48,13 +62,12 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
 
 - Three-test average + wood/stone/iron/ruby/diamond tier thresholds, and
   wiring `is_unlocked` up to them plus a played-days tracker for Scorpion.
-- The Test Your Might screen beyond its backdrop: confirming a character now
-  transitions to it (`src/test_your_might.rs`, `tym-bg.png`, with P1/P2 foot
-  anchors defined), but no fighters/slab/gameplay are drawn yet, and nothing
-  leads from it into the typing test.
-- Hooking up the newly-added `assets/<character>_frame0N.png` sprite frames,
-  `assets/*_placement.png` reference art, and `assets/tym-*.png` UI pieces -
-  all present in `assets/` but not yet referenced from code.
+- Test Your Might gameplay: both fighters idle in place behind their wood
+  slabs, but there's no strike/victory triggering (pass rules TBD), and
+  nothing leads from this screen into the typing test.
+- Choosing the material per player/tier (wood/stone/steel/ruby/diamond) and
+  using the `-2` (broken) variants; only `tym-wood-1.png` is wired up. The
+  `*_placement.png` files are reference art only and aren't drawn.
 - Local persistence of test history (times, wpm, accuracy).
 - Windows build/packaging (developed so far on WSL/Linux; need a cross-build
   or native Windows build pass before shipping the floating always-on-top
@@ -62,7 +75,11 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
 
 ## Open questions
 
-- None blocking right now; typing test core is working and approved.
+- None blocking. Typing test core, fighter placement/idle animation, and
+  material placement are working and approved.
+- `tym-bg.png` has alignment marker pixels baked in (orange corners, green
+  slab brackets, purple floor marks) that show in-app. Possibly swap in a
+  clean display copy and keep the marked one as reference - not decided.
 
 ## More detail
 

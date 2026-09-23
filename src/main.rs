@@ -1,10 +1,11 @@
 // Test Your Might - arcade cabinet app scaffold.
 // Window is fixed at 500x700 to match mk-cabinet.png. Each screen (character
 // select, test-your-might, typing test) renders only inside the cabinet's
-// "screen" rect of that image: (32,151) -> (467,441). See char_select.rs,
+// "screen" rect of that image: (32,151) -> (467,441) inclusive, 436x291. See char_select.rs,
 // test_your_might.rs, and typing_test.rs for the individual screens.
 
 mod char_select;
+mod fighter;
 mod test_your_might;
 mod typing_test;
 
@@ -19,9 +20,11 @@ const WINDOW_W: f32 = 500.0;
 const WINDOW_H: f32 = 700.0;
 
 // Screen rect measured from mk-cabinet.png (flood-filled bounding box of the
-// blue-gray panel).
+// blue-gray panel). The panel's last pixel column/row is 467/441, so the
+// exclusive max is one past that - 436x291, matching the screen art exactly so
+// it's drawn 1:1 rather than resampled.
 const SCREEN_MIN: egui::Pos2 = egui::pos2(32.0, 151.0);
-const SCREEN_MAX: egui::Pos2 = egui::pos2(467.0, 441.0);
+const SCREEN_MAX: egui::Pos2 = egui::pos2(468.0, 442.0);
 
 #[derive(PartialEq)]
 enum Screen {
@@ -68,6 +71,8 @@ impl eframe::App for App {
             Screen::CharSelect => {
                 self.char_select.handle_input(ctx);
                 if self.char_select.confirmed {
+                    let now = ctx.input(|i| i.time);
+                    self.test_your_might.start_match(ctx, self.char_select.selected_character(), now);
                     self.screen = Screen::TestYourMight;
                 }
             }
@@ -99,7 +104,7 @@ impl eframe::App for App {
                         self.char_select.draw(&mut screen_ui, ctx, screen_rect);
                     }
                     Screen::TestYourMight => {
-                        self.test_your_might.draw(&mut screen_ui, screen_rect);
+                        self.test_your_might.draw(&mut screen_ui, ctx, screen_rect);
                     }
                     Screen::Typing => {
                         self.typing.draw(&mut screen_ui, ctx, screen_rect);

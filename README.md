@@ -10,9 +10,9 @@ Not a serious product, just a hobby project.
 
 - **Rust** - compiles to a single native binary, no runtime/installer needed.
 - **eframe / egui** (glow backend) - windowing and immediate-mode rendering.
-- **image** - decodes the cabinet PNG at compile time (embedded via
-  `include_bytes!`).
-- **rand** - picks words for the typing test.
+- **image** - decodes the PNG art (cabinet, screens, fighter sprites,
+  materials), all embedded in the binary via `include_bytes!`.
+- **rand** - picks words for the typing test and the CPU opponent.
 
 The window is a fixed 500x700, undecorated, always-on-top, and draggable by
 clicking the cabinet art outside the screen area.

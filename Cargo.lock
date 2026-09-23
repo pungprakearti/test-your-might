@@ -2071,7 +2071,7 @@ dependencies = [
 
 [[package]]
 name = "test-your-might"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "directories",
  "eframe",
