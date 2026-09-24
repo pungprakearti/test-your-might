@@ -112,6 +112,12 @@ Deleting the file by hand does the same thing. If the file is ever
 unreadable, the app moves it aside as `progress.json.unreadable-<time>`
 instead of overwriting it.
 
+## Version
+
+```
+test-your-might.exe --version      # also -v; prints e.g. "Test Your Might 0.0.17"
+```
+
 ## Window size
 
 The window is half the height of the monitor it's on, and resizes when you
@@ -155,8 +161,8 @@ git push origin v0.0.16
 Running the workflow by hand from the Actions tab builds both without
 publishing anything.
 
-Release builds run without a console window on Windows, so flags like
-`--reset` work silently there.
+Release builds run without a console window of their own on Windows; when
+launched from a terminal they print to it (e.g. `--version`, `--reset`).
 
 ### Development notes
 

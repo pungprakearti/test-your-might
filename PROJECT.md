@@ -108,6 +108,10 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
     pass/time) in the OS data dir (`directories` crate), or `$TYM_DATA_DIR`.
     Written atomically at the end of each round; an unparseable file is
     moved aside (`progress.json.unreadable-<unix time>`), never overwritten.
+  - `--version` (`-v`, `--v`, `-V`) prints the version and exits before
+    any other flag runs. Windows release builds call `AttachConsole` on
+    startup so flag output reaches the launching terminal (verified in a
+    real cmd window).
   - `--height <frac>` flag: window height as a fraction of the monitor's
     (0.1-1.0, default 0.5).
   - `--reset` command-line flag (parsed in `main`) permanently deletes

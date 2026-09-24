@@ -2115,7 +2115,7 @@ dependencies = [
 
 [[package]]
 name = "test-your-might"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "chrono",
  "directories",
@@ -2125,6 +2125,7 @@ dependencies = [
  "rand",
  "serde",
  "serde_json",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

@@ -255,11 +255,33 @@ impl eframe::App for App {
     }
 }
 
+// Release builds on Windows are GUI apps with no console of their own, so
+// output from command-line flags would go nowhere. Attach to the console of
+// the terminal that launched us, if any (a no-op when started from Explorer,
+// and in debug builds, which already have a console).
+#[cfg(windows)]
+fn attach_parent_console() {
+    use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+    // SAFETY: plain Win32 call with a constant argument; failure is harmless.
+    unsafe {
+        AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+}
+
 fn main() -> eframe::Result<()> {
+    #[cfg(windows)]
+    attach_parent_console();
+
     // Command-line flags:
+    //   --version (-v)     print the version and exit
     //   --reset            delete the saved progress, then start fresh
     //   --height <frac>    window height as a fraction of the monitor's
     //                      height (default 0.5)
+    // --version is checked first so it never has side effects like --reset.
+    if std::env::args().skip(1).any(|a| matches!(a.as_str(), "--version" | "--v" | "-v" | "-V")) {
+        println!("Test Your Might {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     let mut height_fraction = HEIGHT_FRACTION;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -273,7 +295,7 @@ fn main() -> eframe::Result<()> {
                 Ok(None) => eprintln!("--reset: no saved progress to delete"),
                 Err(e) => eprintln!("--reset: couldn't delete saved progress: {e}"),
             },
-            other => eprintln!("ignoring unknown argument {other:?} (supported: --reset, --height <frac>)"),
+            other => eprintln!("ignoring unknown argument {other:?} (supported: --version, --reset, --height <frac>)"),
         }
     }
 
