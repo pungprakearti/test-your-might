@@ -81,7 +81,8 @@ factor live and inject keys, which WSLg's Wayland doesn't allow.
 
 `tools/update-e2e.sh` (Linux, macOS, Git Bash on Windows; CI runs it on
 Windows and macOS) builds this checkout and a 99.0.0 copy, signs the copy
-with a throwaway key, serves it from a local fake GitHub, and runs the
+with a throwaway key, serves it from a local fake GitHub
+(`tools/fake-release-server.py`), and runs the
 installed game's `--update`: the good release must install, and tampered,
 wrongly-signed, replayed (signed for another version), unsigned, and
 not-newer ones must be refused or ignored with the install untouched.
@@ -89,9 +90,17 @@ not-newer ones must be refused or ignored with the install untouched.
 Hooks for trying the in-game prompt against your own fake server (see
 `src/update.rs`):
 
-- `TYM_UPDATE_URL=<url>`: latest-release JSON to use instead of GitHub's
-  (`{"tag_name":"v99.0.0","assets":[{"name":..,"browser_download_url":..}]}`).
-  Also turns on the startup check in debug builds, which otherwise skip it.
+- `TYM_UPDATE_URL=<url>`: use this instead of the GitHub repo URL. The game
+  requests `<url>/releases/latest` (expects a redirect to
+  `.../releases/tag/<tag>`) and `<url>/releases/download/<tag>/<file>`, the
+  same github.com web URLs it uses normally (not the REST API, which is
+  limited to 60 unauthenticated requests an hour per IP). Also turns on the
+  startup check in debug builds, which otherwise skip it.
+  `python3 tools/fake-release-server.py <root> <port> [--throttle]` serves
+  `<root>/<repo>/latest` (a tag, e.g. `v99.0.0`) and
+  `<root>/<repo>/<tag>/<files>` that way; `--throttle` slows downloads so
+  the progress bar is visible. Then use
+  `TYM_UPDATE_URL=http://127.0.0.1:<port>/<repo>`.
 - `TYM_UPDATE_PUBKEY=<base64>`: trust this key instead of
   `keys/release-signing.pub`.
 - `TYM_UPDATE_ASSET=<name>`: the asset to look for (Linux builds aren't
@@ -99,8 +108,7 @@ Hooks for trying the in-game prompt against your own fake server (see
 
 `cargo run --example update_sign -- keygen <dir>` makes a throwaway key pair
 (`test.key`, `test.pub`); `... -- sign <key> <file> "test-your-might <asset>
-<version>"` writes `<file>.minisig`. A throttled server (`time.sleep` in
-`SimpleHTTPRequestHandler.copyfile`) makes the progress bar visible.
+<version>"` writes `<file>.minisig`.
 
 ## Windows builds and real-Windows testing from WSL
 

@@ -1,6 +1,6 @@
 [package]
 name = "test-your-might"
-version = "0.0.19"
+version = "0.0.20"
 edition = "2021"
 
 [dependencies]
@@ -22,10 +22,10 @@ windows-sys = { version = "0.59", features = ["Win32_System_Console"] }
 # (SChannel / Security.framework), so certificates the OS trusts - e.g. a
 # company proxy's - work. Linux, only used for development, uses rustls.
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
-ureq = { version = "2", default-features = false, features = ["native-tls", "json"] }
+ureq = { version = "2", default-features = false, features = ["native-tls"] }
 
 [target.'cfg(not(any(windows, target_os = "macos")))'.dependencies]
-ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+ureq = { version = "2", default-features = false, features = ["tls"] }
 
 [profile.release]
 opt-level = "z"

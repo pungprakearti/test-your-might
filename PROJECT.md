@@ -153,7 +153,9 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
 
 - The `*_placement.png` files are reference art only and aren't drawn.
 - Self-update (`src/update.rs`, prompt in `src/update_prompt.rs`, `--update`
-  flag): release builds check GitHub's latest release at startup and offer
+  flag): release builds check GitHub's latest release at startup (via the
+  github.com `releases/latest` redirect and `releases/download/<tag>/` URLs,
+  not the rate-limited REST API) and offer
   it on character select; installs only minisign-signed assets whose signed
   trusted comment is "test-your-might <asset> <version>" (key:
   `keys/release-signing.pub`; secret in `~/.config/test-your-might/` and the
@@ -161,7 +163,7 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   replaces the exe (self_replace), macOS the whole .app. HTTPS: OS TLS on
   Windows/macOS (company proxy certs work), rustls on Linux (dev only).
   Relaunch keeps only `--height`. E2E: `tools/update-e2e.sh` (CI on
-  Windows+macOS). First version with it: 0.0.19.
+  Windows+macOS). First release with it: 0.0.20 (0.0.19 was never released).
 - Releases: pushing a `v*` tag runs `.github/workflows/release.yml`:
   Windows `.exe` (windows-latest) and a universal (arm64+x86_64) macOS
   `.app`, ad-hoc signed, zipped as `test-your-might-macos.zip`

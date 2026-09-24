@@ -133,7 +133,7 @@ To update from a terminal instead:
 test-your-might.exe --update
 ```
 
-This works from v0.0.19 on; older versions need one manual download.
+This works from v0.0.20 on; older versions need one manual download.
 
 ## Window size
 
@@ -172,8 +172,8 @@ an end-to-end self-update test on both. Pushing a version tag also signs the
 builds and publishes them as a GitHub Release:
 
 ```
-git tag v0.0.19
-git push origin v0.0.19
+git tag v0.0.20
+git push origin v0.0.20
 ```
 
 Signing needs the `MINISIGN_SECRET_KEY` repository secret; see

@@ -1,8 +1,10 @@
 // Self-update from GitHub releases.
 //
 // `check` asks GitHub for the latest release and returns it if it's newer
-// than this build and has a download for this platform. `install` downloads
-// that asset and its minisign signature, verifies the signature against the
+// than this build and is signed for this platform. It uses github.com's web
+// URLs, not the REST API, which only allows 60 unauthenticated requests an
+// hour per IP address - a whole office can share one. `install` downloads
+// the asset, verifies its minisign signature against the
 // public key in keys/release-signing.pub - including the signed trusted
 // comment, which must name this asset and the release's version, so an older
 // signed build can't be passed off as a newer one - and then swaps it in:
@@ -14,9 +16,12 @@
 // update_prompt.rs; `run_cli` is the `--update` flag.
 //
 // Test hooks (environment variables, see docs/dev-environment.md):
-//   TYM_UPDATE_URL=<url>       latest-release JSON to use instead of GitHub's
-//                              (also turns on the startup check in debug
-//                              builds)
+//   TYM_UPDATE_URL=<url>       a stand-in for the GitHub repo URL, serving
+//                              <url>/releases/latest (a redirect to
+//                              .../releases/tag/<tag>) and
+//                              <url>/releases/download/<tag>/<file>, like
+//                              tools/fake-release-server.py (also turns on
+//                              the startup check in debug builds)
 //   TYM_UPDATE_PUBKEY=<base64> trust this minisign public key instead
 //   TYM_UPDATE_ASSET=<name>    asset to look for (e.g. to try a Linux build,
 //                              which isn't released)
@@ -29,9 +34,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use serde::Deserialize;
-
-const LATEST_URL: &str = "https://api.github.com/repos/pungprakearti/test-your-might/releases/latest";
+const REPO_URL: &str = "https://github.com/pungprakearti/test-your-might";
 const PUBLIC_KEY_FILE: &str = include_str!("../keys/release-signing.pub");
 // Far above any real release (~5 MB), so a bad server can't fill the disk.
 const MAX_DOWNLOAD_BYTES: usize = 100 * 1024 * 1024;
@@ -64,7 +67,8 @@ pub struct Release {
     pub version: Version,
     asset: String,
     asset_url: String,
-    sig_url: String,
+    // The asset's minisign signature, fetched by `check`.
+    signature: String,
 }
 
 // Where to restart from once an update is installed.
@@ -72,18 +76,6 @@ pub struct Release {
 pub enum Installed {
     Executable(PathBuf),
     MacBundle(PathBuf),
-}
-
-#[derive(Deserialize)]
-struct ApiRelease {
-    tag_name: String,
-    assets: Vec<ApiAsset>,
-}
-
-#[derive(Deserialize)]
-struct ApiAsset {
-    name: String,
-    browser_download_url: String,
 }
 
 // Whether to check for updates at startup: release builds only (a debug
@@ -111,8 +103,9 @@ pub fn trusted_comment(asset: &str, version: Version) -> String {
     format!("test-your-might {asset} {version}")
 }
 
-fn agent() -> Result<ureq::Agent, String> {
+fn agent(redirects: u32) -> Result<ureq::Agent, String> {
     let builder = ureq::AgentBuilder::new()
+        .redirects(redirects)
         .timeout_connect(Duration::from_secs(10))
         .timeout_read(Duration::from_secs(30))
         .user_agent(USER_AGENT);
@@ -124,36 +117,45 @@ fn agent() -> Result<ureq::Agent, String> {
     Ok(builder.build())
 }
 
-// The latest release, if it's newer than this build and has everything
-// needed to update this platform.
+// The latest release, if it's newer than this build and signed for this
+// platform. Fetching the (small) signature here means only releases that can
+// actually be installed are offered.
 pub fn check() -> Result<Option<Release>, String> {
     let Some(asset) = asset_name() else {
         return Ok(None);
     };
-    let url = env::var("TYM_UPDATE_URL").unwrap_or_else(|_| LATEST_URL.to_owned());
-    let latest: ApiRelease = agent()?
-        .get(&url)
-        .set("Accept", "application/vnd.github+json")
+    let repo = env::var("TYM_UPDATE_URL").unwrap_or_else(|_| REPO_URL.to_owned());
+    let repo = repo.trim_end_matches('/');
+    // <repo>/releases/latest redirects to <repo>/releases/tag/<latest tag>.
+    let latest = agent(0)?
+        .get(&format!("{repo}/releases/latest"))
         .call()
-        .map_err(|e| format!("Couldn't check for updates ({e})."))?
-        .into_json()
-        .map_err(|e| format!("Unexpected reply checking for updates ({e})."))?;
-    let version = Version::parse(&latest.tag_name)
-        .ok_or_else(|| format!("The latest release has an unexpected tag {:?}.", latest.tag_name))?;
+        .map_err(|e| format!("Couldn't check for updates ({e})."))?;
+    let tag = latest
+        .header("Location")
+        .and_then(|location| location.rsplit_once("/releases/tag/"))
+        .map(|(_, tag)| tag.to_owned())
+        .ok_or_else(|| format!("Couldn't find the latest release (HTTP {}).", latest.status()))?;
+    let version =
+        Version::parse(&tag).ok_or_else(|| format!("The latest release has an unexpected tag {tag:?}."))?;
     if version <= Version::current() {
         return Ok(None);
     }
-    let url_of = |name: &str| {
-        latest.assets.iter().find(|a| a.name == name).map(|a| a.browser_download_url.clone())
+    let asset_url = format!("{repo}/releases/download/{tag}/{asset}");
+    let signature = match agent(5)?.get(&format!("{asset_url}.minisig")).call() {
+        Ok(response) => response
+            .into_string()
+            .map_err(|e| format!("Couldn't download the update's signature ({e})."))?,
+        Err(ureq::Error::Status(404, _)) => {
+            return Err(format!("Release {version} has no signature for {asset}."));
+        }
+        Err(e) => return Err(format!("Couldn't download the update's signature ({e}).")),
     };
-    let asset_url = url_of(&asset).ok_or_else(|| format!("Release {version} has no {asset}."))?;
-    let sig_url = url_of(&format!("{asset}.minisig"))
-        .ok_or_else(|| format!("Release {version} has no signature for {asset}."))?;
-    Ok(Some(Release { version, asset, asset_url, sig_url }))
+    Ok(Some(Release { version, asset, asset_url, signature }))
 }
 
 fn download(url: &str, progress: &dyn Fn(f32)) -> Result<Vec<u8>, String> {
-    let response = agent()?.get(url).call().map_err(|e| format!("Couldn't download the update ({e})."))?;
+    let response = agent(5)?.get(url).call().map_err(|e| format!("Couldn't download the update ({e})."))?;
     let total = response.header("Content-Length").and_then(|s| s.parse::<usize>().ok());
     if total.is_some_and(|t| t > MAX_DOWNLOAD_BYTES) {
         return Err("The download is unexpectedly large.".into());
@@ -213,10 +215,8 @@ pub fn install(release: &Release, progress: &dyn Fn(f32)) -> Result<Installed, S
     // Before anything is replaced: afterwards the running executable's path
     // may point at the moved-away old file.
     let exe = env::current_exe().map_err(|e| format!("Can't find the running game ({e})."))?;
-    let signature = download(&release.sig_url, &|_| {})?;
-    let signature = String::from_utf8(signature).map_err(|_| "The update's signature is unreadable.".to_owned())?;
     let data = download(&release.asset_url, progress)?;
-    verify(&data, &signature, release)?;
+    verify(&data, &release.signature, release)?;
     match mac_bundle(&exe) {
         Some(bundle) => replace_bundle(&bundle, &data).map(|()| Installed::MacBundle(bundle)),
         None => replace_executable(&exe, &data).map(|()| Installed::Executable(exe)),

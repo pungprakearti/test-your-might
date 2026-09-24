@@ -8,6 +8,7 @@
 # not-newer releases are refused or ignored without touching the install.
 #
 # Runs on Linux, macOS, and Windows (Git Bash). Needs cargo and python3.
+# The fake GitHub is tools/fake-release-server.py.
 # Usage: tools/update-e2e.sh
 set -euo pipefail
 
@@ -79,43 +80,37 @@ mkdir "$work/key" "$work/otherkey"
 "${sign[@]}" keygen "$work/otherkey"
 "${sign[@]}" sign "$work/key/test.key" "$work/www/$asset" "test-your-might $asset 99.0.0"
 
-# Variants, each in its own folder with its own latest.json.
-variant() { mkdir -p "$work/www/$1" && cp "$work/www/$asset" "$work/www/$asset.minisig" "$work/www/$1/"; }
-variant good
-variant tampered
-"$python" - "$work/www/tampered/$asset" <<'PY'
+# Variants: each is a fake repo for tools/fake-release-server.py, with its
+# latest tag in <variant>/latest and that release's files in <variant>/<tag>/.
+variant() { # <name> [<tag>]
+    local tag=${2:-v99.0.0}
+    mkdir -p "$work/www/$1/$tag"
+    echo "$tag" > "$work/www/$1/latest"
+    cp "$work/www/$asset" "$work/www/$asset.minisig" "$work/www/$1/$tag/"
+    echo "$work/www/$1/$tag"
+}
+variant good >/dev/null
+dir=$(variant tampered)
+"$python" - "$dir/$asset" <<'PY'
 import sys
 p = sys.argv[1]
 data = bytearray(open(p, "rb").read())
 data[len(data) // 2] ^= 0xFF
 open(p, "wb").write(bytes(data))
 PY
-variant wrongkey
-"${sign[@]}" sign "$work/otherkey/test.key" "$work/www/wrongkey/$asset" "test-your-might $asset 99.0.0"
-variant replay
-"${sign[@]}" sign "$work/key/test.key" "$work/www/replay/$asset" "test-your-might $asset 98.0.0"
-variant unsigned
-rm "$work/www/unsigned/$asset.minisig"
-variant notnewer
+dir=$(variant wrongkey)
+"${sign[@]}" sign "$work/otherkey/test.key" "$dir/$asset" "test-your-might $asset 99.0.0"
+dir=$(variant replay)
+"${sign[@]}" sign "$work/key/test.key" "$dir/$asset" "test-your-might $asset 98.0.0"
+dir=$(variant unsigned)
+rm "$dir/$asset.minisig"
+variant notnewer v0.0.1 >/dev/null
 
 port=$((20000 + RANDOM % 20000))
-for v in good tampered wrongkey replay unsigned notnewer; do
-    tag=v99.0.0; [ $v = notnewer ] && tag=v0.0.1
-    {
-        printf '{"tag_name":"%s","assets":[' "$tag"
-        sep=
-        for f in "$work/www/$v/"*; do
-            name=$(basename "$f")
-            printf '%s{"name":"%s","browser_download_url":"http://127.0.0.1:%s/%s/%s"}' "$sep" "$name" "$port" "$v" "$name"
-            sep=,
-        done
-        printf ']}'
-    } > "$work/www/$v/latest.json"
-done
-(cd "$work/www" && exec "$python" -m http.server "$port" --bind 127.0.0.1 >/dev/null 2>&1) &
+"$python" "$root/tools/fake-release-server.py" "$work/www" "$port" &
 server_pid=$!
 for _ in $(seq 50); do
-    "$python" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$port/good/latest.json')" 2>/dev/null && break
+    "$python" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$port/good/releases/download/v99.0.0/$asset.minisig')" 2>/dev/null && break
     sleep 0.2
 done
 
@@ -133,7 +128,7 @@ install_old() {
 # Runs `--update` against variant $1; output in $work/out, status in $status.
 run_update() {
     set +e
-    TYM_UPDATE_URL="http://127.0.0.1:$port/$1/latest.json" \
+    TYM_UPDATE_URL="http://127.0.0.1:$port/$1" \
     TYM_UPDATE_PUBKEY="$(cat "$work/key/test.pub")" \
     TYM_UPDATE_ASSET="$asset" \
         "$exe" --update > "$work/out" 2>&1
