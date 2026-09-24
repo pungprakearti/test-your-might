@@ -73,8 +73,13 @@ struct WindowFit {
     // Windows, winit's own resize for a DPI change lands after ours), so it's
     // retried every RESIZE_RETRY_SECS while the window is still off.
     resize_requested_at: Option<f64>,
+    // Zoom factor the current frame's input was gathered with (see
+    // fit_window).
+    input_zoom: Option<f32>,
     last_outer_px: Option<egui::Pos2>,
-    moved_at: f64,
+    last_wanted_px: Option<egui::Vec2>,
+    // Last time the window moved or its monitor-based size changed.
+    changed_at: f64,
 }
 
 impl App {
@@ -116,17 +121,27 @@ impl App {
     // scales together. Zoom always follows the window's actual size, so the
     // design stays in proportion even if the OS resizes the window (DPI
     // change mid-drag, a refused resize, a restored saved size). A monitor
-    // change only resizes once the window has been still for SETTLE_SECS, so
-    // it doesn't jump around mid-drag. Returns where the design sits in the
-    // window, in points.
+    // change only resizes once the window position and the monitor reading
+    // have both been steady for SETTLE_SECS, so it doesn't jump around
+    // mid-drag or on a one-off odd reading (and still works on Wayland,
+    // where the window position isn't known). Returns where the design sits
+    // in the window, in points.
     fn fit_window(&mut self, ctx: &egui::Context) -> egui::Rect {
         let now = ctx.input(|i| i.time);
         let ppp = ctx.pixels_per_point();
+        let native = ctx.native_pixels_per_point().unwrap_or(1.0);
+        let fit = &mut self.fit;
+        // egui-winit converts monitor_size/outer_rect to points with the zoom
+        // in effect when it gathered this frame's input. After a zoom change
+        // egui switches to the new zoom but only rescales screen_rect, so
+        // converting them back with ctx.pixels_per_point() would be off by
+        // the zoom ratio for a frame - enough to set off an endless resize
+        // loop. Use the zoom the input was gathered with instead.
+        let input_ppp = native * fit.input_zoom.unwrap_or(ctx.zoom_factor());
         let (monitor_px, outer_px, maximized, fullscreen) = ctx.input(|i| {
             let v = i.viewport();
-            (v.monitor_size.map(|s| s * ppp), v.outer_rect.map(|r| r.min * ppp), v.maximized, v.fullscreen)
+            (v.monitor_size.map(|s| s * input_ppp), v.outer_rect.map(|r| r.min * input_ppp), v.maximized, v.fullscreen)
         });
-        let fit = &mut self.fit;
 
         // A maximized/fullscreen window can't take our size.
         if maximized == Some(true) {
@@ -136,17 +151,17 @@ impl App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
         }
 
-        if outer_px != fit.last_outer_px {
-            fit.last_outer_px = outer_px;
-            fit.moved_at = now;
-        }
-        // (update's regular repaint keeps checking this.)
-        let settled = now - fit.moved_at >= SETTLE_SECS;
-
         // Physical pixels per design point for this monitor.
-        let native = ctx.native_pixels_per_point().unwrap_or(1.0);
         let wanted_scale = monitor_px.map_or(native, |m| self.height_fraction * m.y / WINDOW_H);
         let wanted_px = (WINDOW_SIZE * wanted_scale).round();
+
+        if outer_px != fit.last_outer_px || Some(wanted_px) != fit.last_wanted_px {
+            fit.last_outer_px = outer_px;
+            fit.last_wanted_px = Some(wanted_px);
+            fit.changed_at = now;
+        }
+        // (update's regular repaint keeps checking this.)
+        let settled = now - fit.changed_at >= SETTLE_SECS;
         if fit.target_px.is_none() || settled {
             fit.target_px = Some(wanted_px);
         }
@@ -163,7 +178,9 @@ impl App {
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(target_px / ctx.pixels_per_point()));
             fit.resize_requested_at = Some(now);
         }
-        // Takes effect next frame; this frame keeps the current zoom.
+        // The next frame's input is gathered with the zoom in effect now (a
+        // zoom set below only applies once that frame starts).
+        fit.input_zoom = Some(ctx.zoom_factor());
         if (zoom - ctx.zoom_factor()).abs() > 0.0001 {
             ctx.set_zoom_factor(zoom);
         }

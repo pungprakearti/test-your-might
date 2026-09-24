@@ -15,7 +15,11 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   Window size = half the current monitor's height (`HEIGHT_FRACTION`, or
   `--height <frac>`), cabinet-shaped, regardless of OS scale - user's call,
   "try it, not set in stone". `fit_window` in `src/main.rs` resizes once the
-  window has sat still on a monitor for 0.4s, retries lost resizes, undoes
+  window position and monitor reading have been steady for 0.4s (Wayland
+  gives no window position), converts egui's monitor size/position with
+  the zoom they were gathered at (egui only rescales screen_rect on a zoom
+  change; using the new zoom caused an endless resize loop under
+  `cargo run` on WSLg), retries lost resizes, undoes
   maximize, and always zooms to the window's actual size so the cabinet stays
   in proportion. Background: a coworker (3 monitors, mixed scaling) saw the
   old fixed-points window "blow up"; the closest Windows repro was the old
