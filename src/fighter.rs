@@ -161,6 +161,7 @@ impl Pose {
 }
 
 pub struct Fighter {
+    pub character: Character,
     frames: [Option<egui::TextureHandle>; FRAME_COUNT],
     pose: Pose,
     pose_started: f64,
@@ -172,7 +173,7 @@ impl Fighter {
         let prefix = character.sprite_prefix();
         let bytes = character.frame_bytes();
         let frames = std::array::from_fn(|i| load_texture(ctx, &format!("{prefix}_frame{:02}", i + 1), bytes[i]));
-        Self { frames, pose: Pose::Idle, pose_started: now }
+        Self { character, frames, pose: Pose::Idle, pose_started: now }
     }
 
     // Switches to `pose` as of time `started` (egui input time). No-op if

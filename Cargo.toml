@@ -1,6 +1,6 @@
 [package]
 name = "test-your-might"
-version = "0.0.22"
+version = "0.0.23"
 edition = "2021"
 
 [dependencies]
@@ -14,6 +14,8 @@ directories = "5"
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 minisign-verify = "0.2.5"
 self-replace = "1.5.0"
+# Sound effects (src/audio.rs): playback only, MP3 only.
+rodio = { version = "0.22.2", default-features = false, features = ["playback", "mp3"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Console"] }

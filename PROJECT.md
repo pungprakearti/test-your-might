@@ -43,8 +43,18 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   art so it draws 1:1 (measured from the PNG, see git history of
   `src/main.rs` for the flood-fill measurement approach).
 - GUI stack: `eframe`/`egui` (glow backend). Window is undecorated,
-  always-on-top, draggable by clicking the cabinet art outside the screen,
-  closable via the X button top-right.
+  always-on-top, draggable by clicking the cabinet art outside the screen.
+- Mute and Close buttons (user-requested, "larger and prominent"): 28px
+  round buttons at the top right over the marquee corner (`MUTE_CENTER`,
+  `CLOSE_CENTER` in `src/main.rs`), dark disc + white ring + white icon,
+  soft drop shadow (`SHADOW_*`), hover highlight (Close turns red) and a
+  tooltip. Mute silences all sound instantly (music keeps its place) and is
+  saved in eframe's `app.ron` (`MUTED_KEY`).
+- All sound is also silent while the window doesn't have focus
+  (user-requested; egui's `viewport().focused`, unknown = focused). Separate
+  from the Mute setting: not saved, doesn't change the icon. E2E: on the
+  private display, focus changed with `XSetInputFocus` (no WM there, and
+  X's default focus-follows-pointer doesn't count as focus for winit).
 - Typing test mechanics follow monkeytype's model: fixed word stream,
   per-character correctness tracking, WPM = (correct chars / 5) / minutes,
   accuracy = correct keystrokes / total keystrokes. Timer starts on first
@@ -58,7 +68,8 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   routing; each screen lives in its own module (`char_select.rs`,
   `test_your_might.rs`) with `handle_input`/`draw`. `typing_test.rs` is the
   typing test, drawn by the Test Your Might screen; `fighter.rs` holds the
-  `Character` enum, sprite loading, and pose frames; `dev.rs` has env-var dev
+  `Character` enum, sprite loading, and pose frames; `audio.rs` plays the
+  sounds; `dev.rs` has env-var dev
   hooks (skip to a match, inject typing, save a screenshot - see
   `docs/dev-environment.md`).
 - Fighters: confirming a character starts a match with that character as
@@ -134,6 +145,10 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   - `--reset` command-line flag (parsed in `main`) permanently deletes
     `progress.json` (not the `.unreadable-*` backups) before the app starts.
     Unknown flags are ignored with a warning.
+- Caret: before a word's first letter is typed it sits 2px left of the
+  word (`CARET_WORD_START_SHIFT`, user-requested so it doesn't cover the
+  letter; 5px was too far); mid-word it stays on the letter boundary (letters touch there, so
+  a shift would cut through the typed letter).
 - Typing test lives on the Test Your Might screen, on the concrete floor strip
   of `tym-bg.png`: (0,208)-(436,291), 436x83, under a 1px highlight line at
   row 207. Compact layout (12px header, 3 lines of 14px words), centered
@@ -152,6 +167,31 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   character. A hint line on a dark pill under the grid (centered at
   (218, 264), in the plain stone below the frame edge at y=236) names the
   highlighted fighter and says "ENTER to fight" or how to unlock them.
+- Sound (`src/audio.rs`, rodio, MP3s in `assets/sounds/` embedded; sources
+  in `assets/sounds/SOURCES.md`), all user-specified: Insert Coin at startup
+  (not with `TYM_DEV_START`); UI sound 1 when the character select cursor
+  actually moves; Enter on an unlocked fighter plays Music Cue 1 and holds
+  on character select for 1s (`CONFIRM_HOLD_SECS`) before the match; "Test
+  Your Might" at every round start; Hitsound 31 once at strike impact if
+  either slab breaks; when player 1's victory pose starts, "<fighter> wins",
+  "Excellent", Claps 2 back to back with a 0.25s gap (`ANNOUNCER_GAP`, my
+  pick - the clips have no silence padding). Announcer lines are one
+  sequence at a time: a new one (next round) or Esc cuts the old one off.
+  - Music: the character select theme loops from startup (not with
+    `TYM_DEV_START`) and on returning to character select; Enter on a
+    fighter stops it. Every round start plays the Test Your Might theme
+    once, alongside the line.
+  - My calls, easy to change: music at half volume (`MUSIC_VOLUME`; the
+    themes are ~2 LU louder than the announcer and 11 LU louder than the
+    click); the character select theme rip fades out, so it loops a 4.087s
+    phrase found by autocorrelation (r=0.98 seam, 10ms crossfade).
+  - Latency (user reported late cursor clicks): clips are pre-decoded on a
+    background thread, effects skip the MP3's near-silent lead-in (16ms on
+    the click), and the output buffer is 1024 frames (rodio default ~2048).
+    Measured under WSL: ~55-60ms sooner. WSLg adds RDP audio lag on top
+    that the app can't affect; untested on real Windows.
+  - No output device = silent, no error. E2E-verified by recording the
+    real output (see `docs/dev-environment.md`).
 - Unlocks (`Character::unlock` in `fighter.rs`, evaluated by
   `Progress::is_unlocked` from saved runs - nothing extra is stored): Liu Kang
   from the start; breaking a material for the first time unlocks wood =
@@ -186,6 +226,10 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   Cargo.toml, signs with `tools/sign-release.sh`, and uploads `.minisig`s. Release builds use
   `windows_subsystem = "windows"` (no console). Not code-signed/notarized
   (needs paid certs), so SmartScreen/Gatekeeper warn on first launch.
+  2026-09-24: on the user's work Windows 11 laptop, antivirus silently
+  quarantined the v0.0.22 exe ("Windows cannot access the specified
+  device, path, or file"); a re-download ran fine. Authenticode signing
+  (e.g. Microsoft Trusted Signing, ~$10/mo) is the proper fix if it recurs.
 - Nobody has run the macOS build on a real Mac yet (CI only builds it).
   App icon not set yet on either platform.
 

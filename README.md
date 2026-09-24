@@ -38,8 +38,8 @@ After that, the game updates itself (see [Updates](#updates)).
 2. **Type.** The timer starts on your first keypress. Type the words on the
    floor of the stage; your speed fills the yellow gauge beside your fighter.
 3. **Beat the red bar.** When the 30 seconds are up, both fighters strike.
-   If your final WPM reached the goal, your slab breaks and you move on to the
-   next material.
+   If your final WPM reached the goal, your slab breaks, the announcer calls
+   your win, and you move on to the next material.
 
 ### Controls
 
@@ -53,8 +53,9 @@ After that, the game updates itself (see [Updates](#updates)).
 | Test Your Might | Enter | After a round: start the next round |
 | Test Your Might | Esc | Back to character select (a round in progress is discarded) |
 
-Drag the window by the cabinet art around the screen; close it with the X in
-the top-right corner. On the bottom right of the cabinet, the hockey puck
+Drag the window by the cabinet art around the screen. The two round buttons
+in the top-right corner mute all sound and music (remembered next time) and
+close the game. The game is also silent whenever another window has focus. On the bottom right of the cabinet, the hockey puck
 opens [biscuitsinthebasket.com](https://www.biscuitsinthebasket.com) and the
 GitHub logo opens this repo in your browser.
 
@@ -164,8 +165,14 @@ cargo run --release
 ```
 
 `cargo build --release` produces a standalone executable in
-`target/release/`. All the art is embedded, so the executable is the whole
-app: copy it anywhere and run it.
+`target/release/`. All the art and sound is embedded, so the executable is
+the whole app: copy it anywhere and run it.
+
+On Linux, building needs the ALSA development files for sound
+(`sudo apt install pkg-config libasound2-dev` on Debian/Ubuntu). Under WSL,
+to hear it, also route ALSA to WSLg's PulseAudio:
+`sudo apt install libasound2-plugins` and put `pcm.!default pulse` and
+`ctl.!default pulse` in `~/.asoundrc`.
 
 Development so far has been on Linux under WSL (the window shows up on the
 Windows desktop through WSLg).
@@ -210,6 +217,7 @@ launched from a terminal they print to it (e.g. `--version`, `--update`,
 - [serde](https://serde.rs/) + [directories](https://crates.io/crates/directories)
   for saved progress, [chrono](https://crates.io/crates/chrono) for the
   days-played unlock
+- [rodio](https://crates.io/crates/rodio) for sound
 - [ureq](https://crates.io/crates/ureq),
   [minisign-verify](https://crates.io/crates/minisign-verify) and
   [self_replace](https://crates.io/crates/self-replace) for signed
@@ -219,5 +227,5 @@ launched from a terminal they print to it (e.g. `--version`, `--update`,
 
 This is an unofficial, non-commercial fan project. It isn't affiliated with
 or endorsed by Warner Bros. Games, NetherRealm Studios or Midway. Mortal
-Kombat, its characters and its artwork are trademarks and copyrights of
+Kombat, its characters, artwork and sounds are trademarks and copyrights of
 their respective owners.

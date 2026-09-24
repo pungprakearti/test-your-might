@@ -10,6 +10,7 @@
 // (32,151) -> (467,441) inclusive, 436x291. See char_select.rs,
 // test_your_might.rs, and typing_test.rs for the individual screens.
 
+mod audio;
 mod char_select;
 mod dev;
 mod fighter;
@@ -22,6 +23,7 @@ mod update_prompt;
 use eframe::egui;
 use std::time::Duration;
 
+use audio::{Audio, Sound};
 use char_select::CharSelectScreen;
 use test_your_might::TestYourMightScreen;
 use update_prompt::UpdatePrompt;
@@ -81,6 +83,26 @@ const LINK_ICONS: [LinkIcon; 2] = [
         url: update::REPO_URL,
     },
 ];
+// The round Mute and Close buttons, side by side at the top right, over the
+// corner of the marquee: dark discs with a white ring and icon so they stand
+// out against the art, with a tooltip saying what they do.
+const CLOSE_CENTER: egui::Pos2 = egui::pos2(480.0, 20.0);
+const MUTE_CENTER: egui::Pos2 = egui::pos2(446.0, 20.0);
+const BUTTON_RADIUS: f32 = 14.0;
+// Soft drop shadow under each button: SHADOW_STEPS translucent black discs,
+// growing to SHADOW_SPREAD past the button, nudged down by SHADOW_OFFSET.
+const SHADOW_SPREAD: f32 = 7.0;
+const SHADOW_STEPS: usize = 7;
+const SHADOW_STEP_ALPHA: u8 = 22;
+const SHADOW_OFFSET: egui::Vec2 = egui::vec2(0.0, 2.0);
+const BUTTON_FILL: egui::Color32 = egui::Color32::from_black_alpha(200);
+const BUTTON_HOVER_FILL: egui::Color32 = egui::Color32::from_gray(70);
+const CLOSE_HOVER_FILL: egui::Color32 = egui::Color32::from_rgb(200, 40, 40);
+const BUTTON_INK: egui::Color32 = egui::Color32::WHITE;
+const MUTED_MARK: egui::Color32 = egui::Color32::from_rgb(240, 80, 80);
+// eframe storage key for the mute setting.
+const MUTED_KEY: &str = "muted";
+
 const LINK_ICON_TOP: f32 = 625.0;
 const LINK_ICON_SIZE: f32 = 50.0;
 // The PNGs' margin, in design points (8px at 4x).
@@ -102,6 +124,70 @@ impl LinkIcon {
             egui::vec2(LINK_ICON_SIZE * self.aspect, LINK_ICON_SIZE)
         };
         egui::Rect::from_center_size(self.box_rect().center(), size)
+    }
+}
+
+// A round button at `center` (window coordinates): draws the disc and ring,
+// then `icon` inside, and returns the response with `tooltip` attached.
+fn round_button(
+    ui: &egui::Ui,
+    id: &str,
+    center: egui::Pos2,
+    tooltip: &str,
+    hover_fill: egui::Color32,
+    icon: impl FnOnce(&egui::Painter, egui::Pos2),
+) -> egui::Response {
+    let rect = egui::Rect::from_center_size(center, egui::Vec2::splat(BUTTON_RADIUS * 2.0));
+    let resp = ui.interact(rect, egui::Id::new(id), egui::Sense::click()).on_hover_text(tooltip);
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let painter = ui.painter();
+    // Largest, faintest disc first; the overlaps darken toward the middle.
+    for step in (1..=SHADOW_STEPS).rev() {
+        let radius = BUTTON_RADIUS + SHADOW_SPREAD * step as f32 / SHADOW_STEPS as f32;
+        painter.circle_filled(center + SHADOW_OFFSET, radius, egui::Color32::from_black_alpha(SHADOW_STEP_ALPHA));
+    }
+    painter.circle(
+        center,
+        BUTTON_RADIUS,
+        if resp.hovered() { hover_fill } else { BUTTON_FILL },
+        egui::Stroke::new(1.5f32, BUTTON_INK),
+    );
+    icon(painter, center);
+    resp
+}
+
+fn draw_close_icon(painter: &egui::Painter, c: egui::Pos2) {
+    let stroke = egui::Stroke::new(2.5f32, BUTTON_INK);
+    let d = 5.5;
+    painter.line_segment([c + egui::vec2(-d, -d), c + egui::vec2(d, d)], stroke);
+    painter.line_segment([c + egui::vec2(d, -d), c + egui::vec2(-d, d)], stroke);
+}
+
+// A speaker; with sound waves, or a red X when muted.
+fn draw_speaker_icon(painter: &egui::Painter, c: egui::Pos2, muted: bool) {
+    let c = c + egui::vec2(-2.5, 0.0);
+    let p = |x: f32, y: f32| c + egui::vec2(x, y);
+    painter.add(egui::Shape::convex_polygon(
+        vec![p(-7.0, -3.0), p(-3.5, -3.0), p(1.5, -7.5), p(1.5, 7.5), p(-3.5, 3.0), p(-7.0, 3.0)],
+        BUTTON_INK,
+        egui::Stroke::NONE,
+    ));
+    if muted {
+        let stroke = egui::Stroke::new(2.0f32, MUTED_MARK);
+        painter.line_segment([p(4.5, -3.5), p(11.5, 3.5)], stroke);
+        painter.line_segment([p(11.5, -3.5), p(4.5, 3.5)], stroke);
+    } else {
+        for radius in [5.0, 9.0] {
+            let points = (-4..=4)
+                .map(|i| {
+                    let a = i as f32 / 4.0 * std::f32::consts::FRAC_PI_4;
+                    p(1.5 + radius * a.cos(), radius * a.sin())
+                })
+                .collect();
+            painter.add(egui::Shape::line(points, egui::Stroke::new(1.8f32, BUTTON_INK)));
+        }
     }
 }
 
@@ -137,6 +223,7 @@ struct App {
     test_your_might: TestYourMightScreen,
     dev_screenshot: dev::Screenshot,
     updater: UpdatePrompt,
+    audio: Audio,
     height_fraction: f32,
     fit: WindowFit,
 }
@@ -183,6 +270,7 @@ impl App {
             test_your_might,
             dev_screenshot: dev::Screenshot::from_env(),
             updater: UpdatePrompt::start(&cc.egui_ctx),
+            audio: Audio::open(cc.storage.and_then(|s| eframe::get_value(s, MUTED_KEY)).unwrap_or(false)),
             height_fraction,
             fit: WindowFit::default(),
         };
@@ -192,8 +280,11 @@ impl App {
             app.char_select.dev_select(character);
         }
         if let Some(character) = dev::start_character() {
-            app.test_your_might.start_match(&cc.egui_ctx, character, 0.0);
+            app.test_your_might.start_match(&cc.egui_ctx, &mut app.audio, character, 0.0);
             app.screen = Screen::TestYourMight;
+        } else {
+            app.audio.play(Sound::InsertCoin);
+            app.audio.play_music(Sound::CharacterSelectTheme);
         }
         // Correct words first, then any free text after them.
         if let Some(n) = dev::typed_words() {
@@ -284,6 +375,8 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let window = self.fit_window(ctx);
+        // Silent while another window has focus. (Unknown counts as focused.)
+        self.audio.set_focused(ctx.input(|i| i.viewport().focused).unwrap_or(true));
         match self.screen {
             // An update offer (character select only) takes the keyboard
             // while it's up.
@@ -293,15 +386,17 @@ impl eframe::App for App {
                 }
             }
             Screen::CharSelect => {
-                self.char_select.handle_input(ctx);
-                if self.char_select.confirmed {
+                self.char_select.handle_input(ctx, &mut self.audio);
+                if let Some(character) = self.char_select.chosen(ctx) {
                     let now = ctx.input(|i| i.time);
-                    self.test_your_might.start_match(ctx, self.char_select.selected_character(), now);
+                    self.test_your_might.start_match(ctx, &mut self.audio, character, now);
                     self.screen = Screen::TestYourMight;
                 }
             }
             Screen::TestYourMight => {
-                if self.test_your_might.handle_input(ctx) == test_your_might::Action::CharacterSelect {
+                if self.test_your_might.handle_input(ctx, &mut self.audio) == test_your_might::Action::CharacterSelect {
+                    self.audio.stop_announcer();
+                    self.audio.play_music(Sound::CharacterSelectTheme);
                     self.char_select.reopen(self.test_your_might.progress());
                     self.screen = Screen::CharSelect;
                 }
@@ -334,28 +429,30 @@ impl eframe::App for App {
                     }
                 }
 
-                let close_rect = egui::Rect::from_min_size(
-                    window.min + egui::vec2(WINDOW_W - 30.0, 6.0),
-                    egui::vec2(24.0, 24.0),
+                let muted = self.audio.muted();
+                let mute_resp = round_button(
+                    ui,
+                    "mute-button",
+                    MUTE_CENTER + window.min.to_vec2(),
+                    if muted { "Unmute sound" } else { "Mute sound" },
+                    BUTTON_HOVER_FILL,
+                    |painter, c| draw_speaker_icon(painter, c, muted),
                 );
-                let close_resp = ui.interact(
-                    close_rect,
-                    egui::Id::new("close-button"),
-                    egui::Sense::click(),
+                if mute_resp.clicked() {
+                    self.audio.set_muted(!muted);
+                }
+                let close_resp = round_button(
+                    ui,
+                    "close-button",
+                    CLOSE_CENTER + window.min.to_vec2(),
+                    "Close",
+                    CLOSE_HOVER_FILL,
+                    draw_close_icon,
                 );
-                let close_color = if close_resp.hovered() {
-                    egui::Color32::from_rgb(240, 80, 80)
-                } else {
-                    egui::Color32::from_rgb(230, 230, 230)
-                };
-                let painter = ui.painter();
-                painter.circle_filled(close_rect.center(), 11.0, egui::Color32::from_black_alpha(140));
-                let inset = close_rect.shrink(7.0);
-                painter.line_segment([inset.left_top(), inset.right_bottom()], egui::Stroke::new(2.0f32, close_color));
-                painter.line_segment([inset.right_top(), inset.left_bottom()], egui::Stroke::new(2.0f32, close_color));
                 if close_resp.clicked() {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
+                let button_rects = [mute_resp.rect, close_resp.rect];
 
                 let mut icon_rects = Vec::with_capacity(LINK_ICONS.len());
                 for (icon, tex) in LINK_ICONS.iter().zip(&self.link_icons) {
@@ -382,12 +479,12 @@ impl eframe::App for App {
                 }
 
                 // Drag the whole (undecorated) window from anywhere on the
-                // cabinet art outside the screen, the close button, and the
-                // link icons.
+                // cabinet art outside the screen, the buttons, and the link
+                // icons.
                 if ui.input(|i| i.pointer.primary_pressed()) {
                     if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
                         if !screen_rect.contains(pos)
-                            && !close_rect.contains(pos)
+                            && !button_rects.iter().any(|r| r.contains(pos))
                             && !icon_rects.iter().any(|r| r.contains(pos))
                         {
                             ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
@@ -396,6 +493,10 @@ impl eframe::App for App {
                 }
             });
         self.dev_screenshot.update(ctx);
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, MUTED_KEY, &self.audio.muted());
     }
 }
 

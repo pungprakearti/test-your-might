@@ -419,6 +419,11 @@ const HINT_COLOR: egui::Color32 = egui::Color32::from_rgb(200, 200, 210);
 const EXTRA_COLOR: egui::Color32 = egui::Color32::from_rgb(170, 45, 45);
 const POP_IN_SECS: f32 = 0.12;
 const POP_RISE: f32 = 5.0;
+// Before a word's first letter is typed, the caret sits this far left of it,
+// in the space before the word, so it doesn't cover the letter to type next
+// (user's pick, after trying 5).
+// (Mid-word the letters touch, so there it stays on the boundary.)
+const CARET_WORD_START_SHIFT: f32 = 2.0;
 
 fn draw_screen(
     ui: &mut egui::Ui,
@@ -524,13 +529,14 @@ fn draw_screen(
     let start_line = active_line.saturating_sub(1);
     let end_line = start_line + VISIBLE_LINES;
 
-    // Caret target: end of the current word's typed text, or its start.
+    // Caret target: end of the current word's typed text, or just before its
+    // start.
     let typed_count = test.words[test.current_word].typed.chars().count();
     let caret_target_xy = if typed_count == 0 {
         placed
             .iter()
             .find(|p| p.wi == test.current_word)
-            .map(|p| (p.line, p.x))
+            .map(|p| (p.line, p.x - CARET_WORD_START_SHIFT))
             .or(current_word_end)
             .unwrap_or((active_line, 0.0))
     } else {

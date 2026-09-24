@@ -52,13 +52,95 @@ or just open a new terminal tab.
     500x700; the cabinet screen is the (32,151)-(467,441) region of the
     500x700 design, scaled to the window.
 
+## Building on Linux: ALSA headers
+
+Sound (rodio/cpal) links against ALSA. The user installed the system
+packages (2026-09-24), so a plain `cargo run` works:
+`sudo apt install pkg-config libasound2-dev libasound2-plugins`, plus
+`~/.asoundrc` with `pcm.!default pulse` / `ctl.!default pulse` so sound
+reaches WSLg's PulseAudio (the Windows speakers).
+
+Without root (there's no passwordless sudo for the agent), the same
+packages, plus the X11 bits below, are unpacked in `~/.cache/tym-dev-libs`:
+
+```
+cd ~/.cache/tym-dev-libs
+apt-get download libasound2-dev pkgconf pkgconf-bin libpkgconf3 libasound2-plugins
+for f in *.deb; do dpkg-deb -x $f .; done
+ln -sf /usr/lib/x86_64-linux-gnu/libasound.so.2 usr/lib/x86_64-linux-gnu/libasound.so
+```
+
+Then build with:
+
+```
+D=~/.cache/tym-dev-libs
+export PKG_CONFIG=$D/usr/bin/pkg-config PKG_CONFIG_SYSROOT_DIR=$D \
+  PKG_CONFIG_PATH=$D/usr/lib/x86_64-linux-gnu/pkgconfig \
+  LD_LIBRARY_PATH=$D/usr/lib/x86_64-linux-gnu
+```
+
+## Hearing and recording sound under WSL
+
+WSL's ALSA has no output device, so by default the app runs silently
+("no audio output, playing without sound"). To route it to WSLg's
+PulseAudio server (plays on the Windows speakers), write
+`~/.cache/tym-dev-libs/asoundrc`:
+
+```
+pcm_type.pulse { lib "<D>/usr/lib/x86_64-linux-gnu/alsa-lib/libasound_module_pcm_pulse.so" }
+ctl_type.pulse { lib "<D>/usr/lib/x86_64-linux-gnu/alsa-lib/libasound_module_ctl_pulse.so" }
+pcm.!default { type pulse }
+ctl.!default { type pulse }
+```
+
+and run with `ALSA_CONFIG_PATH=/usr/share/alsa/alsa.conf:<D>/asoundrc`.
+Record what the app plays, in real time, with
+`ffmpeg -f pulse -i RDPSink.monitor -ac 1 -ar 44100 rec.wav`. To check which
+sounds played and when, cross-correlate each clip (decoded to 44.1 kHz mono
+WAV) against the recording; matches score r ~1.0 even when sounds overlap.
+Injected keys (`tools/xkey.py`) go to whichever X window has focus, so on
+WSLg's display they can miss the game if the user is typing elsewhere (and
+theirs can land in it) - use the private display below where possible. The
+character select theme under the cursor click lowers its match to r ~0.4,
+so detect with a lower threshold there.
+
+## Private display: dev runs that don't touch the desktop
+
+`TYM_DEV_*` runs and key injection on WSLg's display pop the window up on
+the user's Windows desktop, and it takes keyboard focus: if they're typing
+elsewhere, their keys land in the game (and injected keys can miss it).
+`tools/isolated-x.sh <command...>` runs the command against a private Xvfb
+display (:99, 2560x1440) inside a user+mount namespace instead - nothing
+shows on the desktop, and `tools/xkey.py` always reaches the game. It needs
+Xvfb and friends unpacked (no root) into `~/.cache/tym-dev-libs`:
+
+```
+cd ~/.cache/tym-dev-libs
+apt-get download xvfb libxfont2 libfontenc1 xserver-common x11-xkb-utils
+for f in *.deb; do dpkg-deb -x $f .; done
+mkdir -p xkbbin && cp usr/bin/xkbcomp xkbbin/
+```
+
+(Xvfb runs `/usr/bin/xkbcomp` by absolute path, so the script overlays
+`xkbbin/` onto `/usr/bin` inside the namespace, and mounts a private
+`/tmp/.X11-unix`.) Inside, set `LD_LIBRARY_PATH` to
+`~/.cache/tym-dev-libs/usr/lib/x86_64-linux-gnu` (libxkbcommon-x11, below)
+and, for a silent run, `ALSA_CONFIG_PATH=/nonexistent`. Example:
+
+```
+tools/isolated-x.sh env LD_LIBRARY_PATH=$HOME/.cache/tym-dev-libs/usr/lib/x86_64-linux-gnu \
+  ALSA_CONFIG_PATH=/nonexistent TYM_DATA_DIR=/tmp/tym-data TYM_DEV_START=liu_kang \
+  TYM_DEV_SCREENSHOT=/tmp/shot.png ./target/debug/test-your-might
+```
+
 ## X11 runs: monitor scale changes and real key presses
 
 Running under X11 (XWayland) instead of Wayland lets you change the scale
 factor live and inject keys, which WSLg's Wayland doesn't allow.
 
 - winit's X11 backend needs `libxkbcommon-x11`, which isn't installed. Fetch it
-  without root into a scratch dir (`<dir>` below):
+  without root into a scratch dir (`<dir>` below; already unpacked in
+  `~/.cache/tym-dev-libs`):
 
   ```
   cd <dir> && apt-get download libxkbcommon-x11-0 libxcb-xkb1

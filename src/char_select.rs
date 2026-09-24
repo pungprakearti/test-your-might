@@ -1,10 +1,14 @@
 // Character select screen: the 7-portrait cross-shaped grid drawn over
 // cs-background.png, navigated with arrow keys, with a blinking green
 // selector. Locked fighters (see `Character::unlock`) can't be picked; a line
-// under the grid says who's highlighted and how to unlock them.
+// under the grid says who's highlighted and how to unlock them. The theme
+// loops while choosing (started by the app); moving the cursor clicks;
+// confirming stops the theme, plays a music cue and holds on the pick for
+// CONFIRM_HOLD_SECS before the match starts.
 
 use eframe::egui;
 
+use crate::audio::{Audio, Sound};
 use crate::fighter::{Character, Unlock};
 use crate::load_texture;
 use crate::progress::Progress;
@@ -61,6 +65,8 @@ fn move_vertical(idx: usize, target_row: u8) -> usize {
 }
 
 const SELECTOR_ANIM_FRAME_SECS: f64 = 0.25;
+// How long the screen holds on the chosen fighter after Enter.
+const CONFIRM_HOLD_SECS: f64 = 1.0;
 
 // The line under the grid naming the highlighted fighter and how to unlock
 // them: centered in the plain stone below the grid frame (which ends at
@@ -84,7 +90,8 @@ pub struct CharSelectScreen {
     unlocked: [bool; 7],
     days_played: usize,
     selected: usize,
-    pub confirmed: bool,
+    // egui time Enter confirmed the selected fighter.
+    confirmed_at: Option<f64>,
 }
 
 impl CharSelectScreen {
@@ -111,7 +118,7 @@ impl CharSelectScreen {
             unlocked: [false; 7],
             days_played: 0,
             selected: 0,
-            confirmed: false,
+            confirmed_at: None,
         };
         screen.refresh_unlocks(progress);
         // Start on a fighter that can actually be picked.
@@ -122,7 +129,7 @@ impl CharSelectScreen {
     // Back from a match: pick again, starting from the last choice, with
     // anything unlocked since then now available.
     pub fn reopen(&mut self, progress: &Progress) {
-        self.confirmed = false;
+        self.confirmed_at = None;
         self.refresh_unlocks(progress);
     }
 
@@ -156,10 +163,22 @@ impl CharSelectScreen {
         CHAR_CELLS[self.selected].character
     }
 
-    pub fn handle_input(&mut self, ctx: &egui::Context) {
-        if self.confirmed {
+    // The fighter to start a match with, once the hold after confirming is
+    // over.
+    pub fn chosen(&self, ctx: &egui::Context) -> Option<Character> {
+        let left = self.confirmed_at? + CONFIRM_HOLD_SECS - ctx.input(|i| i.time);
+        if left > 0.0 {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(left));
+            return None;
+        }
+        Some(self.selected_character())
+    }
+
+    pub fn handle_input(&mut self, ctx: &egui::Context, audio: &mut Audio) {
+        if self.confirmed_at.is_some() {
             return;
         }
+        let before = self.selected;
         ctx.input(|i| {
             if i.key_pressed(egui::Key::ArrowLeft) {
                 self.selected = move_horizontal(self.selected, -1);
@@ -174,9 +193,15 @@ impl CharSelectScreen {
                 self.selected = move_vertical(self.selected, 1);
             }
             if i.key_pressed(egui::Key::Enter) && self.unlocked[self.selected] {
-                self.confirmed = true;
+                self.confirmed_at = Some(i.time);
             }
         });
+        if self.confirmed_at.is_some() {
+            audio.stop_music();
+            audio.play(Sound::FighterChosen);
+        } else if self.selected != before {
+            audio.play(Sound::CursorMove);
+        }
     }
 
     pub fn draw(&self, ui: &mut egui::Ui, ctx: &egui::Context, screen_rect: egui::Rect) {
@@ -207,7 +232,7 @@ impl CharSelectScreen {
         }
         let cell = &CHAR_CELLS[self.selected];
         let time = ctx.input(|i| i.time);
-        let use_frame1 = self.confirmed || ((time / SELECTOR_ANIM_FRAME_SECS) as u64).is_multiple_of(2);
+        let use_frame1 = self.confirmed_at.is_some() || ((time / SELECTOR_ANIM_FRAME_SECS) as u64).is_multiple_of(2);
         let sel_tex = if use_frame1 { &self.cs_sel1_texture } else { &self.cs_sel2_texture };
         if let Some(tex) = sel_tex {
             let sel_rect = egui::Rect::from_center_size(

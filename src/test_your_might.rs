@@ -2,10 +2,15 @@
 // fighter foot-anchor spots (player 1 / player 2-CPU) confirmed via the
 // Johnny Cage and Sonya Blade placement sprites. Player 1 is the character
 // picked on the select screen; player 2 is a random different character. The
-// typing test runs on the concrete floor strip along the bottom.
+// typing test runs on the concrete floor strip along the bottom. Each round
+// starts with the Test Your Might theme (once) and the announcer saying "Test
+// your might"; a breaking slab makes a hit
+// sound, and when the player's victory pose starts the announcer calls
+// "<fighter> wins", "Excellent", then the crowd claps.
 
 use eframe::egui;
 
+use crate::audio::{Audio, Sound};
 use crate::fighter::{Character, Fighter, Pose};
 use crate::load_texture;
 use crate::progress::{Material, Progress, Run};
@@ -102,6 +107,9 @@ struct Round {
     new_unlocks: Vec<Character>,
     // egui time the timer ran out, which starts the strike sequence.
     ended_at: Option<f64>,
+    // Whether the slab break and the player's win have been heard yet.
+    break_sounded: bool,
+    win_announced: bool,
 }
 
 // Where one fighter is in the end-of-round sequence: strike when the timer
@@ -169,13 +177,15 @@ impl TestYourMightScreen {
         }
     }
 
-    pub fn start_match(&mut self, ctx: &egui::Context, player: Character, now: f64) {
+    pub fn start_match(&mut self, ctx: &egui::Context, audio: &mut Audio, player: Character, now: f64) {
         let cpu = player.random_opponent();
         self.fighters = Some((Fighter::new(ctx, player, now), Fighter::new(ctx, cpu, now)));
-        self.start_round(now);
+        self.start_round(audio, now);
     }
 
-    fn start_round(&mut self, now: f64) {
+    fn start_round(&mut self, audio: &mut Audio, now: f64) {
+        audio.play_music(Sound::TestYourMightTheme);
+        audio.announce(&[Sound::TestYourMight]);
         if let Some((p1, p2)) = &mut self.fighters {
             p1.set_pose(Pose::Idle, now);
             p2.set_pose(Pose::Idle, now);
@@ -186,7 +196,7 @@ impl TestYourMightScreen {
         self.p2_fill = 0.0;
     }
 
-    pub fn handle_input(&mut self, ctx: &egui::Context) -> Action {
+    pub fn handle_input(&mut self, ctx: &egui::Context, audio: &mut Audio) -> Action {
         let now = ctx.input(|i| i.time);
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             return Action::CharacterSelect;
@@ -204,10 +214,18 @@ impl TestYourMightScreen {
         } else if self.round.result.is_some()
             && ctx.input(|i| i.key_pressed(egui::Key::Enter))
         {
-            self.start_round(now);
+            self.start_round(audio, now);
             return Action::Stay;
         }
         if let (Some([p1_end, p2_end]), Some((p1, p2))) = (self.endings(now), &mut self.fighters) {
+            if (p1_end.broken || p2_end.broken) && !self.round.break_sounded {
+                audio.play(Sound::SlabBreak);
+                self.round.break_sounded = true;
+            }
+            if p1_end.pose == Pose::Victory && !self.round.win_announced {
+                audio.announce(&[Sound::Wins(p1.character), Sound::Excellent, Sound::Claps]);
+                self.round.win_announced = true;
+            }
             p1.set_pose(p1_end.pose, p1_end.pose_started);
             p2.set_pose(p2_end.pose, p2_end.pose_started);
             if let Some(next) = [p1_end.next_change, p2_end.next_change].into_iter().flatten().reduce(f64::min) {
@@ -353,7 +371,16 @@ impl TestYourMightScreen {
 impl Round {
     fn new(progress: &Progress) -> Self {
         let material = progress.material;
-        Round { material, target_wpm: progress.target_wpm(), cpu: CpuRun::new(material), result: None, new_unlocks: Vec::new(), ended_at: None }
+        Round {
+            material,
+            target_wpm: progress.target_wpm(),
+            cpu: CpuRun::new(material),
+            result: None,
+            new_unlocks: Vec::new(),
+            ended_at: None,
+            break_sounded: false,
+            win_announced: false,
+        }
     }
 }
 
