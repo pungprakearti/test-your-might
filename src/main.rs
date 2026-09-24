@@ -43,6 +43,17 @@ const RESIZE_RETRY_SECS: f64 = 1.0;
 const SCREEN_MIN: egui::Pos2 = egui::pos2(32.0, 151.0);
 const SCREEN_MAX: egui::Pos2 = egui::pos2(468.0, 442.0);
 
+// GitHub logo on the bottom-right of the cabinet's lower panel (x 17-482,
+// from y 597 in mk-cabinet.png), mirroring the coin plate on the left: the
+// plate starts 30px in from the panel's left edge at y 625, so the logo's
+// top is at y 625 and its right edge 30px in from the panel's right edge.
+// Clicking it opens the repo. assets/github-logo.png is
+// assets/GitHub_Invertocat_White.svg rendered white at 4x (160px) with
+// `cargo run --example render_svg -- <svg> <png> 160`, tinted when drawn.
+const GITHUB_LOGO: egui::Rect = egui::Rect::from_min_max(egui::pos2(413.0, 625.0), egui::pos2(453.0, 665.0));
+const GITHUB_LOGO_COLOR: egui::Color32 = egui::Color32::from_gray(150);
+const GITHUB_LOGO_HOVER_COLOR: egui::Color32 = egui::Color32::from_gray(215);
+
 #[derive(PartialEq)]
 enum Screen {
     CharSelect,
@@ -50,15 +61,25 @@ enum Screen {
 }
 
 pub(crate) fn load_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::TextureHandle> {
+    load_texture_with(ctx, name, bytes, egui::TextureOptions::LINEAR)
+}
+
+fn load_texture_with(
+    ctx: &egui::Context,
+    name: &str,
+    bytes: &[u8],
+    options: egui::TextureOptions,
+) -> Option<egui::TextureHandle> {
     let img = image::load_from_memory(bytes).ok()?.to_rgba8();
     let (w, h) = img.dimensions();
     let pixels = img.into_raw();
     let color_image = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &pixels);
-    Some(ctx.load_texture(name, color_image, egui::TextureOptions::LINEAR))
+    Some(ctx.load_texture(name, color_image, options))
 }
 
 struct App {
     bg_texture: Option<egui::TextureHandle>,
+    github_logo: Option<egui::TextureHandle>,
     screen: Screen,
     char_select: CharSelectScreen,
     test_your_might: TestYourMightScreen,
@@ -90,8 +111,16 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>, height_fraction: f32) -> Self {
         let bg_texture = load_texture(&cc.egui_ctx, "cabinet-bg", include_bytes!("../assets/mk-cabinet.png"));
         let test_your_might = TestYourMightScreen::new(cc);
+        // Drawn at a fraction of its size, so mipmapped to stay smooth.
+        let github_logo = load_texture_with(
+            &cc.egui_ctx,
+            "github-logo",
+            include_bytes!("../assets/github-logo.png"),
+            egui::TextureOptions { mipmap_mode: Some(egui::TextureFilter::Linear), ..egui::TextureOptions::LINEAR },
+        );
         let mut app = Self {
             bg_texture,
+            github_logo,
             screen: Screen::CharSelect,
             char_select: CharSelectScreen::new(cc, test_your_might.progress()),
             test_your_might,
@@ -271,11 +300,32 @@ impl eframe::App for App {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
 
+                let logo_rect = GITHUB_LOGO.translate(window.min.to_vec2());
+                let logo_resp = ui.interact(logo_rect, egui::Id::new("github-logo"), egui::Sense::click());
+                let logo_color = if logo_resp.hovered() {
+                    ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                    GITHUB_LOGO_HOVER_COLOR
+                } else {
+                    GITHUB_LOGO_COLOR
+                };
+                if let Some(tex) = &self.github_logo {
+                    ui.painter().image(
+                        tex.id(),
+                        logo_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        logo_color,
+                    );
+                }
+                if logo_resp.clicked() {
+                    ctx.open_url(egui::OpenUrl::new_tab(update::REPO_URL));
+                }
+
                 // Drag the whole (undecorated) window from anywhere on the
-                // cabinet art outside the screen and the close button.
+                // cabinet art outside the screen, the close button, and the
+                // GitHub logo.
                 if ui.input(|i| i.pointer.primary_pressed()) {
                     if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
-                        if !screen_rect.contains(pos) && !close_rect.contains(pos) {
+                        if !screen_rect.contains(pos) && !close_rect.contains(pos) && !logo_rect.contains(pos) {
                             ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                         }
                     }

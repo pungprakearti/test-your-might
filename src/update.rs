@@ -34,7 +34,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-const REPO_URL: &str = "https://github.com/pungprakearti/test-your-might";
+pub const REPO_URL: &str = "https://github.com/pungprakearti/test-your-might";
 const PUBLIC_KEY_FILE: &str = include_str!("../keys/release-signing.pub");
 // Far above any real release (~5 MB), so a bad server can't fill the disk.
 const MAX_DOWNLOAD_BYTES: usize = 100 * 1024 * 1024;

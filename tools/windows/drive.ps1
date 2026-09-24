@@ -1,4 +1,4 @@
-# drive.ps1 -Proc <process name> -Action <shot|dblclick|dragto|maximize|key|close> [-Out <png>]
+# drive.ps1 -Proc <process name> -Action <shot|hover|click|dblclick|dragto|maximize|key|close> [-Out <png>]
 #           [-X <x> -Y <y>] [-TX <x> -TY <y>] [-Key <Enter|Escape|Right|...>]
 # Drives a running Test Your Might window on the Windows desktop with the real
 # mouse and reports its rect/DPI; -Out saves a screenshot of the window.
@@ -28,6 +28,12 @@ if ($h -eq [IntPtr]::Zero) { "no window"; exit 1 }
 $r = New-Object W+RECT; [W]::GetWindowRect($h, [ref]$r) | Out-Null
 function Report { [W]::GetWindowRect($h, [ref]$script:r) | Out-Null
   "rect=$($r.l),$($r.t) size=$($r.r-$r.l)x$($r.b-$r.t) maximized=$([W]::IsZoomed($h)) dpi=$([W]::GetDpiForWindow($h))" }
+if ($Action -eq "hover" -or $Action -eq "click") {
+  # Moves the real mouse to (X, Y) in the window; "click" also clicks there.
+  [W]::SetForegroundWindow($h) | Out-Null
+  [W]::SetCursorPos($r.l + $X, $r.t + $Y) | Out-Null; Start-Sleep -Milliseconds 400
+  if ($Action -eq "click") { [W]::mouse_event(2,0,0,0,0); Start-Sleep -Milliseconds 60; [W]::mouse_event(4,0,0,0,0); Start-Sleep -Milliseconds 800 }
+}
 if ($Action -eq "dblclick") {
   [W]::SetForegroundWindow($h) | Out-Null
   [W]::SetCursorPos($r.l + $X, $r.t + $Y) | Out-Null; Start-Sleep -Milliseconds 200

@@ -118,6 +118,9 @@ instead of overwriting it.
 test-your-might.exe --version      # also -v; prints e.g. "Test Your Might 0.0.17"
 ```
 
+The GitHub logo on the bottom right of the cabinet opens this repo in your
+browser.
+
 ## Updates
 
 When a newer version is released, the game offers it on the fighter select

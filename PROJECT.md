@@ -25,6 +25,14 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   old fixed-points window "blow up"; the closest Windows repro was the old
   build at 175% scale being 875x1225, taller than a 1080p monitor.
   Windows/X11 test tooling: `docs/dev-environment.md`.
+- GitHub logo (user-requested): 40x40 at (413, 625) in cabinet coords, on
+  the lower panel's bottom right, mirroring the coin plate's inset (plate
+  starts 30px in from the panel's left edge at y 625). Gray 150, 215 on
+  hover with a pointing-hand cursor; click opens the repo
+  (`update::REPO_URL`) in the browser; excluded from window dragging.
+  `assets/github-logo.png` = `assets/GitHub_Invertocat_White.svg` rendered
+  white at 160px (`cargo run --example render_svg -- <svg> <png> 160`),
+  mipmapped and tinted at draw time.
 - The typing test only renders inside the cabinet's "screen" rect:
   `(32, 151)` to `(467, 441)` inclusive = 436x291, same size as the screen
   art so it draws 1:1 (measured from the PNG, see git history of

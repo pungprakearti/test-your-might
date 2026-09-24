@@ -1,6 +1,6 @@
 [package]
 name = "test-your-might"
-version = "0.0.20"
+version = "0.0.21"
 edition = "2021"
 
 [dependencies]
@@ -39,3 +39,4 @@ path = "src/main.rs"
 
 [dev-dependencies]
 minisign = "0.9.1"
+resvg = "0.48.1"
