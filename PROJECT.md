@@ -10,11 +10,17 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
 - All image assets live under `assets/` (cabinet/character-select art, plus
   unwired character sprite frames and tym-* UI pieces the user has added but
   not yet hooked up).
-- Window is fixed at 500x700 to match `assets/mk-cabinet.png`. Moving it to
-  a monitor with a different scale factor could leave the window the wrong
-  size in points (cabinet art stretched, screen/close button not); `fit_window`
-  in `src/main.rs` now asks for 500x700 back and zooms the whole design to fit
-  meanwhile. Repro on WSL/X11: `docs/dev-environment.md`.
+- Everything is laid out in 500x700 design points to match
+  `assets/mk-cabinet.png`; egui's zoom factor maps them onto the window.
+  Window size = half the current monitor's height (`HEIGHT_FRACTION`, or
+  `--height <frac>`), cabinet-shaped, regardless of OS scale - user's call,
+  "try it, not set in stone". `fit_window` in `src/main.rs` resizes once the
+  window has sat still on a monitor for 0.4s, retries lost resizes, undoes
+  maximize, and always zooms to the window's actual size so the cabinet stays
+  in proportion. Background: a coworker (3 monitors, mixed scaling) saw the
+  old fixed-points window "blow up"; the closest Windows repro was the old
+  build at 175% scale being 875x1225, taller than a 1080p monitor.
+  Windows/X11 test tooling: `docs/dev-environment.md`.
 - The typing test only renders inside the cabinet's "screen" rect:
   `(32, 151)` to `(467, 441)` inclusive = 436x291, same size as the screen
   art so it draws 1:1 (measured from the PNG, see git history of
@@ -102,6 +108,8 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
     pass/time) in the OS data dir (`directories` crate), or `$TYM_DATA_DIR`.
     Written atomically at the end of each round; an unparseable file is
     moved aside (`progress.json.unreadable-<unix time>`), never overwritten.
+  - `--height <frac>` flag: window height as a fraction of the monitor's
+    (0.1-1.0, default 0.5).
   - `--reset` command-line flag (parsed in `main`) permanently deletes
     `progress.json` (not the `.unreadable-*` backups) before the app starts.
     Unknown flags are ignored with a warning.

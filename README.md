@@ -103,6 +103,17 @@ Deleting the file by hand does the same thing. If the file is ever
 unreadable, the app moves it aside as `progress.json.unreadable-<time>`
 instead of overwriting it.
 
+## Window size
+
+The window is half the height of the monitor it's on, and resizes when you
+move it to another monitor. To try a different size, pass `--height` with a
+fraction of the monitor's height:
+
+```
+test-your-might.exe --height 0.6
+cargo run --release -- --height 0.6
+```
+
 ## Building and running
 
 Requires [Rust](https://rustup.rs) (stable).

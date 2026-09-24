@@ -46,9 +46,11 @@ or just open a new terminal tab.
   - `TYM_DEV_TYPE_WORDS=<n>` correctly types the test's first n words at
     startup, before any `TYM_DEV_TYPE` text (useful for a known WPM; e.g. with `TYM_DEV_DELAY=31.5` to see a
     finished round).
-  - `TYM_DEV_SCREENSHOT=<path.png>` saves the full 500x700 window after
-    `TYM_DEV_DELAY` seconds (default 1.0) and quits. The cabinet screen is
-    the (32,151)-(467,441) crop of it.
+  - `TYM_DEV_SCREENSHOT=<path.png>` saves the whole window after
+    `TYM_DEV_DELAY` seconds (default 1.0) and quits. The window is sized
+    from the monitor (see `fit_window`), so the image is usually not
+    500x700; the cabinet screen is the (32,151)-(467,441) region of the
+    500x700 design, scaled to the window.
 
 ## X11 runs: monitor scale changes and real key presses
 
@@ -69,17 +71,39 @@ factor live and inject keys, which WSLg's Wayland doesn't allow.
   an XSETTINGS manager: Xft/DPI 144 (1.5x), then 96 (1x) after 2.5s. winit
   sees that as a `ScaleFactorChanged`, the same path as dragging the window to
   a monitor with a different scale on Windows. Check the window with
-  `xwininfo -name "Test Your Might"` (should be 750x1050 at 1.5x, 500x700 at
-  1x) and grab a frame with `TYM_DEV_SCREENSHOT`.
+  `xwininfo -name "Test Your Might"` (should stay half the monitor's height
+  at any scale) and grab a frame with `TYM_DEV_SCREENSHOT`.
 - `python3 tools/xkey.py r Return` presses keys (XTest) in the focused
   window, e.g. to check keys on the results panel after
   `TYM_DEV_TYPE_WORDS=10` and a 30s wait.
 
-## Windows packaging (not done yet)
+## Windows builds and real-Windows testing from WSL
 
-Still need one of:
-- Cross-compiling from WSL to `x86_64-pc-windows-gnu`/`msvc`, or
-- Building natively on Windows with `cargo build --release`.
+Official releases are built by GitHub Actions (see README). For local
+testing, cross-compile from WSL with `cargo-xwin` (no C code in the project,
+so rust-lld is the only linker needed):
 
-Either way the output is a single `.exe` with no installer, matching the
-"no install file" requirement.
+```
+rustup target add x86_64-pc-windows-msvc
+cargo install cargo-xwin --locked
+XWIN_ACCEPT_LICENSE=1 CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld \
+  cargo xwin build --release --target x86_64-pc-windows-msvc
+```
+
+Copy the `.exe` somewhere under `/mnt/c/...` and start it with
+`powershell.exe -Command "Start-Process 'C:\...\app.exe'"` (set
+`$env:TYM_DATA_DIR` first to keep real progress safe). Don't redirect its
+stderr from `Start-Process`: PowerShell then waits for the app to exit.
+
+- `tools/windows/drive.ps1` finds the window by process name, reports its
+  rect/DPI/maximized state, screenshots it, double-clicks or drags it with
+  the real mouse, sends a maximize, or closes it.
+- `tools/windows/scale.ps1 -Device '\\.\DISPLAY2' [-Set 150]` reads or sets
+  one monitor's display scaling (the undocumented DisplayConfig call the
+  Settings app uses). Put it back afterwards.
+- eframe keeps its own window state (position, size, egui zoom) in
+  `%APPDATA%\Test Your Might\data\app.ron`, separate from `TYM_DATA_DIR`.
+  Back it up before testing and restore it after; builds share it, so one
+  build's saved zoom leaks into the next launch of another.
+- The app is always-on-top: when the user is using one monitor, keep test
+  windows (and the saved position in app.ron) on the other.

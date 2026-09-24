@@ -3,12 +3,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 // Test Your Might - arcade cabinet app scaffold.
-// Window is fixed at 500x700 to match mk-cabinet.png (kept that way across
-// monitor scale changes, see fit_window). Each screen (character
-// select, then Test Your Might with the typing test on its floor) renders only
-// inside the cabinet's "screen" rect of that image: (32,151) -> (467,441)
-// inclusive, 436x291. See char_select.rs, test_your_might.rs, and
-// typing_test.rs for the individual screens.
+// Everything is laid out in 500x700 design points to match mk-cabinet.png;
+// the window itself is sized from the monitor's height (see fit_window). Each
+// screen (character select, then Test Your Might with the typing test on its
+// floor) renders only inside the cabinet's "screen" rect of that image:
+// (32,151) -> (467,441) inclusive, 436x291. See char_select.rs,
+// test_your_might.rs, and typing_test.rs for the individual screens.
 
 mod char_select;
 mod dev;
@@ -26,6 +26,12 @@ use test_your_might::TestYourMightScreen;
 const WINDOW_W: f32 = 500.0;
 const WINDOW_H: f32 = 700.0;
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(WINDOW_W, WINDOW_H);
+// Window height as a fraction of the monitor's height (see fit_window).
+const HEIGHT_FRACTION: f32 = 0.5;
+// How long the window must sit still on a monitor before it's resized for it.
+const SETTLE_SECS: f64 = 0.4;
+// How often to re-ask for the right window size while it's still wrong.
+const RESIZE_RETRY_SECS: f64 = 1.0;
 
 // Screen rect measured from mk-cabinet.png (flood-filled bounding box of the
 // blue-gray panel). The panel's last pixel column/row is 467/441, so the
@@ -54,13 +60,25 @@ struct App {
     char_select: CharSelectScreen,
     test_your_might: TestYourMightScreen,
     dev_screenshot: dev::Screenshot,
-    // Window size (physical pixels) we last asked the OS to correct, so a
-    // refused resize isn't re-requested every frame.
-    resize_requested_for: Option<egui::Vec2>,
+    height_fraction: f32,
+    fit: WindowFit,
+}
+
+// fit_window's state between frames. Sizes are physical pixels.
+#[derive(Default)]
+struct WindowFit {
+    // Size the window should be, from the monitor it last settled on.
+    target_px: Option<egui::Vec2>,
+    // When we last asked the OS for target_px. A request can be lost (on
+    // Windows, winit's own resize for a DPI change lands after ours), so it's
+    // retried every RESIZE_RETRY_SECS while the window is still off.
+    resize_requested_at: Option<f64>,
+    last_outer_px: Option<egui::Pos2>,
+    moved_at: f64,
 }
 
 impl App {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, height_fraction: f32) -> Self {
         let bg_texture = load_texture(&cc.egui_ctx, "cabinet-bg", include_bytes!("../assets/mk-cabinet.png"));
         let test_your_might = TestYourMightScreen::new(cc);
         let mut app = Self {
@@ -69,7 +87,8 @@ impl App {
             char_select: CharSelectScreen::new(cc, test_your_might.progress()),
             test_your_might,
             dev_screenshot: dev::Screenshot::from_env(),
-            resize_requested_for: None,
+            height_fraction,
+            fit: WindowFit::default(),
         };
         // fit_window owns the zoom factor.
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
@@ -90,34 +109,65 @@ impl App {
         app
     }
 
-    // Moving the window to a monitor with a different scale factor can leave
-    // it at a size that no longer matches 500x700 points (the OS/winit resize
-    // on a DPI change isn't reliable - seen with mixed-scale monitors on
-    // Windows, and reproducible on X11). Everything here is laid out in fixed
-    // points, so that used to stretch the cabinet art over the wrong-sized
-    // window while the screen and close button stayed put. Ask for the
-    // design size back, and until the window has it (or if the OS refuses),
-    // zoom so the whole design fits the window as it is. Returns where the
-    // 500x700 design sits in the window, in points.
+    // Sizes the window from the monitor it's on: HEIGHT_FRACTION (or
+    // --height) of the monitor's height, cabinet-shaped, whatever the OS
+    // scale setting. Everything is laid out in fixed 500x700 design points
+    // and the zoom factor maps those onto the window, so the whole cabinet
+    // scales together. Zoom always follows the window's actual size, so the
+    // design stays in proportion even if the OS resizes the window (DPI
+    // change mid-drag, a refused resize, a restored saved size). A monitor
+    // change only resizes once the window has been still for SETTLE_SECS, so
+    // it doesn't jump around mid-drag. Returns where the design sits in the
+    // window, in points.
     fn fit_window(&mut self, ctx: &egui::Context) -> egui::Rect {
+        let now = ctx.input(|i| i.time);
+        let ppp = ctx.pixels_per_point();
+        let (monitor_px, outer_px, maximized, fullscreen) = ctx.input(|i| {
+            let v = i.viewport();
+            (v.monitor_size.map(|s| s * ppp), v.outer_rect.map(|r| r.min * ppp), v.maximized, v.fullscreen)
+        });
+        let fit = &mut self.fit;
+
+        // A maximized/fullscreen window can't take our size.
+        if maximized == Some(true) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+        }
+        if fullscreen == Some(true) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+        }
+
+        if outer_px != fit.last_outer_px {
+            fit.last_outer_px = outer_px;
+            fit.moved_at = now;
+        }
+        // (update's regular repaint keeps checking this.)
+        let settled = now - fit.moved_at >= SETTLE_SECS;
+
+        // Physical pixels per design point for this monitor.
         let native = ctx.native_pixels_per_point().unwrap_or(1.0);
-        let window_px = ctx.screen_rect().size() * ctx.pixels_per_point();
-        let design_px = WINDOW_SIZE * native;
-        let off = (window_px - design_px).abs().max_elem() > 1.5;
-        if off && self.resize_requested_for != Some(window_px) {
-            // InnerSize is in points at the zoom the command is applied with.
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(WINDOW_SIZE / ctx.zoom_factor()));
-            self.resize_requested_for = Some(window_px);
-        } else if !off {
-            self.resize_requested_for = None;
+        let wanted_scale = monitor_px.map_or(native, |m| self.height_fraction * m.y / WINDOW_H);
+        let wanted_px = (WINDOW_SIZE * wanted_scale).round();
+        if fit.target_px.is_none() || settled {
+            fit.target_px = Some(wanted_px);
+        }
+        let target_px = fit.target_px.unwrap_or(wanted_px);
+
+        let window_px = ctx.screen_rect().size() * ppp;
+        let off = (window_px - target_px).abs().max_elem() > 1.5;
+        let zoom = (window_px.x / WINDOW_W).min(window_px.y / WINDOW_H) / native;
+        if !off {
+            fit.resize_requested_at = None;
+        } else if settled && fit.resize_requested_at.is_none_or(|t| now - t >= RESIZE_RETRY_SECS) {
+            // InnerSize is in points at the zoom it's applied with, which is
+            // still this frame's (set_zoom_factor applies next frame).
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(target_px / ctx.pixels_per_point()));
+            fit.resize_requested_at = Some(now);
         }
         // Takes effect next frame; this frame keeps the current zoom.
-        let fit = (window_px.x / design_px.x).min(window_px.y / design_px.y);
-        if (fit - ctx.zoom_factor()).abs() > 0.001 {
-            ctx.set_zoom_factor(fit);
+        if (zoom - ctx.zoom_factor()).abs() > 0.0001 {
+            ctx.set_zoom_factor(zoom);
         }
-        // Centered, snapped to whole pixels so the art isn't resampled.
-        let ppp = ctx.pixels_per_point();
+        // Centered, snapped to whole pixels.
         let min = (ctx.screen_rect().center() - WINDOW_SIZE / 2.0) * ppp;
         egui::Rect::from_min_size(egui::pos2(min.x.round(), min.y.round()) / ppp, WINDOW_SIZE)
     }
@@ -207,15 +257,23 @@ impl eframe::App for App {
 
 fn main() -> eframe::Result<()> {
     // Command-line flags:
-    //   --reset  delete the saved progress, then start fresh
-    for arg in std::env::args().skip(1) {
+    //   --reset            delete the saved progress, then start fresh
+    //   --height <frac>    window height as a fraction of the monitor's
+    //                      height (default 0.5)
+    let mut height_fraction = HEIGHT_FRACTION;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--height" => match args.next().and_then(|v| v.parse::<f32>().ok()) {
+                Some(f) if (0.1..=1.0).contains(&f) => height_fraction = f,
+                _ => eprintln!("--height needs a fraction between 0.1 and 1.0; using {HEIGHT_FRACTION}"),
+            },
             "--reset" => match progress::Progress::delete_save() {
                 Ok(Some(path)) => eprintln!("--reset: deleted {}", path.display()),
                 Ok(None) => eprintln!("--reset: no saved progress to delete"),
                 Err(e) => eprintln!("--reset: couldn't delete saved progress: {e}"),
             },
-            other => eprintln!("ignoring unknown argument {other:?} (supported: --reset)"),
+            other => eprintln!("ignoring unknown argument {other:?} (supported: --reset, --height <frac>)"),
         }
     }
 
@@ -234,6 +292,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Test Your Might",
         options,
-        Box::new(|cc| Ok(Box::new(App::new(cc)))),
+        Box::new(move |cc| Ok(Box::new(App::new(cc, height_fraction)))),
     )
 }
