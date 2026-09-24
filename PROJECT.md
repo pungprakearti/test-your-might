@@ -152,11 +152,22 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
 ## Not yet built
 
 - The `*_placement.png` files are reference art only and aren't drawn.
+- Self-update (`src/update.rs`, prompt in `src/update_prompt.rs`, `--update`
+  flag): release builds check GitHub's latest release at startup and offer
+  it on character select; installs only minisign-signed assets whose signed
+  trusted comment is "test-your-might <asset> <version>" (key:
+  `keys/release-signing.pub`; secret in `~/.config/test-your-might/` and the
+  `MINISIGN_SECRET_KEY` GitHub secret - see `docs/releasing.md`). Windows
+  replaces the exe (self_replace), macOS the whole .app. HTTPS: OS TLS on
+  Windows/macOS (company proxy certs work), rustls on Linux (dev only).
+  Relaunch keeps only `--height`. E2E: `tools/update-e2e.sh` (CI on
+  Windows+macOS). First version with it: 0.0.19.
 - Releases: pushing a `v*` tag runs `.github/workflows/release.yml`:
   Windows `.exe` (windows-latest) and a universal (arm64+x86_64) macOS
   `.app`, ad-hoc signed, zipped as `test-your-might-macos.zip`
-  (macos-latest); a publish job creates the GitHub Release only when both
-  pass. `workflow_dispatch` builds without publishing. Release builds use
+  (macos-latest); CI (build, test, update E2E) also runs on every push to
+  main and on PRs. The publish job (tags only) checks the tag matches
+  Cargo.toml, signs with `tools/sign-release.sh`, and uploads `.minisig`s. Release builds use
   `windows_subsystem = "windows"` (no console). Not code-signed/notarized
   (needs paid certs), so SmartScreen/Gatekeeper warn on first launch.
 - Nobody has run the macOS build on a real Mac yet (CI only builds it).

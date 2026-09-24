@@ -1,11 +1,11 @@
-# drive.ps1 -Proc <process name> -Action <shot|dblclick|dragto|maximize|close> [-Out <png>]
-#           [-X <x> -Y <y>] [-TX <x> -TY <y>]
+# drive.ps1 -Proc <process name> -Action <shot|dblclick|dragto|maximize|key|close> [-Out <png>]
+#           [-X <x> -Y <y>] [-TX <x> -TY <y>] [-Key <Enter|Escape|Right|...>]
 # Drives a running Test Your Might window on the Windows desktop with the real
 # mouse and reports its rect/DPI; -Out saves a screenshot of the window.
 # -X/-Y: grab point inside the window (physical px); -TX/-TY: drag target on
 # the desktop.
-param([string]$Proc = "test-your-might", [string]$Action, [string]$Out, [int]$X = 250, [int]$Y = 60, [int]$TX = 0, [int]$TY = 0)
-Add-Type -AssemblyName System.Drawing
+param([string]$Proc = "test-your-might", [string]$Action, [string]$Out, [int]$X = 250, [int]$Y = 60, [int]$TX = 0, [int]$TY = 0, [string]$Key = "Enter")
+Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type @"
 using System; using System.Runtime.InteropServices;
 public class W {
@@ -19,6 +19,7 @@ public class W {
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, int m, IntPtr w, IntPtr l);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, int flags, int extra);
 }
 "@
 [W]::SetProcessDpiAwarenessContext([IntPtr](-4)) | Out-Null
@@ -44,6 +45,13 @@ if ($Action -eq "dragto") {
   [W]::mouse_event(4,0,0,0,0); Start-Sleep -Milliseconds 1500
 }
 if ($Action -eq "maximize") { [W]::PostMessage($h, 0x112, [IntPtr]0xF030, [IntPtr]::Zero) | Out-Null; Start-Sleep -Milliseconds 150; "after 150ms: maximized=$([W]::IsZoomed($h))"; Start-Sleep -Milliseconds 1500 }
+if ($Action -eq "key") {
+  # Presses one key in the window (after focusing it).
+  $vk = [byte][System.Windows.Forms.Keys]::$Key
+  [W]::SetForegroundWindow($h) | Out-Null; Start-Sleep -Milliseconds 300
+  [W]::keybd_event($vk, 0, 0, 0); Start-Sleep -Milliseconds 50; [W]::keybd_event($vk, 0, 2, 0)
+  Start-Sleep -Milliseconds 300
+}
 if ($Action -eq "close") { [W]::PostMessage($h, 0x10, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null; Start-Sleep 1; "closed"; exit }
 Report
 if ($Out) {

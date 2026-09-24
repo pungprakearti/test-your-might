@@ -7,3 +7,6 @@ CLAUDE.md
 .cursorrules
 .github/copilot-instructions.md
 .aider*
+
+# Signing secret keys - never tracked (the public key is keys/*.pub)
+*.key

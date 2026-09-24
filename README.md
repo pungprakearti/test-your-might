@@ -118,6 +118,23 @@ instead of overwriting it.
 test-your-might.exe --version      # also -v; prints e.g. "Test Your Might 0.0.17"
 ```
 
+## Updates
+
+When a newer version is released, the game offers it on the fighter select
+screen at startup: press Enter to download and install it (the game restarts
+into the new version), or Esc to keep playing. Updates are signed, and the
+game refuses any download that isn't signed with the project's key. It needs
+write access to the folder the game is in (fine for Downloads, the Desktop,
+or Applications).
+
+To update from a terminal instead:
+
+```
+test-your-might.exe --update
+```
+
+This works from v0.0.19 on; older versions need one manual download.
+
 ## Window size
 
 The window is half the height of the monitor it's on, and resizes when you
@@ -148,18 +165,19 @@ Windows desktop through WSLg).
 
 ### Releases
 
-Pushing a version tag builds the Windows `.exe` and a universal macOS
-`.app` (zipped) on GitHub Actions
-([`.github/workflows/release.yml`](.github/workflows/release.yml)) and
-publishes both as a GitHub Release, only if both builds pass:
+Every push to `main` builds and tests the Windows `.exe` and a universal
+macOS `.app` on GitHub Actions
+([`.github/workflows/release.yml`](.github/workflows/release.yml)), including
+an end-to-end self-update test on both. Pushing a version tag also signs the
+builds and publishes them as a GitHub Release:
 
 ```
-git tag v0.0.16
-git push origin v0.0.16
+git tag v0.0.19
+git push origin v0.0.19
 ```
 
-Running the workflow by hand from the Actions tab builds both without
-publishing anything.
+Signing needs the `MINISIGN_SECRET_KEY` repository secret; see
+[`docs/releasing.md`](docs/releasing.md).
 
 Release builds run without a console window of their own on Windows; when
 launched from a terminal they print to it (e.g. `--version`, `--reset`).

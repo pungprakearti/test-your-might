@@ -77,11 +77,37 @@ factor live and inject keys, which WSLg's Wayland doesn't allow.
   window, e.g. to check keys on the results panel after
   `TYM_DEV_TYPE_WORDS=10` and a 30s wait.
 
+## Self-update testing
+
+`tools/update-e2e.sh` (Linux, macOS, Git Bash on Windows; CI runs it on
+Windows and macOS) builds this checkout and a 99.0.0 copy, signs the copy
+with a throwaway key, serves it from a local fake GitHub, and runs the
+installed game's `--update`: the good release must install, and tampered,
+wrongly-signed, replayed (signed for another version), unsigned, and
+not-newer ones must be refused or ignored with the install untouched.
+
+Hooks for trying the in-game prompt against your own fake server (see
+`src/update.rs`):
+
+- `TYM_UPDATE_URL=<url>`: latest-release JSON to use instead of GitHub's
+  (`{"tag_name":"v99.0.0","assets":[{"name":..,"browser_download_url":..}]}`).
+  Also turns on the startup check in debug builds, which otherwise skip it.
+- `TYM_UPDATE_PUBKEY=<base64>`: trust this key instead of
+  `keys/release-signing.pub`.
+- `TYM_UPDATE_ASSET=<name>`: the asset to look for (Linux builds aren't
+  released, so set it there, e.g. `test-your-might-linux`).
+
+`cargo run --example update_sign -- keygen <dir>` makes a throwaway key pair
+(`test.key`, `test.pub`); `... -- sign <key> <file> "test-your-might <asset>
+<version>"` writes `<file>.minisig`. A throttled server (`time.sleep` in
+`SimpleHTTPRequestHandler.copyfile`) makes the progress bar visible.
+
 ## Windows builds and real-Windows testing from WSL
 
 Official releases are built by GitHub Actions (see README). For local
 testing, cross-compile from WSL with `cargo-xwin` (no C code in the project,
-so rust-lld is the only linker needed):
+so rust-lld is the only linker needed; HTTPS uses the OS's TLS on Windows, so
+no C compiler is needed either):
 
 ```
 rustup target add x86_64-pc-windows-msvc
@@ -97,7 +123,11 @@ stderr from `Start-Process`: PowerShell then waits for the app to exit.
 
 - `tools/windows/drive.ps1` finds the window by process name, reports its
   rect/DPI/maximized state, screenshots it, double-clicks or drags it with
-  the real mouse, sends a maximize, or closes it.
+  the real mouse, presses a key (`-Action key -Key Enter`), sends a
+  maximize, or closes it.
+- Windows can reach a server listening on `127.0.0.1` inside WSL, so a fake
+  update server can run in WSL. To see a GUI build's stdout, run it with
+  `Start-Process ... -Wait -RedirectStandardOutput <file>`.
 - `tools/windows/scale.ps1 -Device '\\.\DISPLAY2' [-Set 150]` reads or sets
   one monitor's display scaling (the undocumented DisplayConfig call the
   Settings app uses). Put it back afterwards.

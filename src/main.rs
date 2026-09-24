@@ -16,12 +16,15 @@ mod fighter;
 mod progress;
 mod test_your_might;
 mod typing_test;
+mod update;
+mod update_prompt;
 
 use eframe::egui;
 use std::time::Duration;
 
 use char_select::CharSelectScreen;
 use test_your_might::TestYourMightScreen;
+use update_prompt::UpdatePrompt;
 
 const WINDOW_W: f32 = 500.0;
 const WINDOW_H: f32 = 700.0;
@@ -60,6 +63,7 @@ struct App {
     char_select: CharSelectScreen,
     test_your_might: TestYourMightScreen,
     dev_screenshot: dev::Screenshot,
+    updater: UpdatePrompt,
     height_fraction: f32,
     fit: WindowFit,
 }
@@ -92,6 +96,7 @@ impl App {
             char_select: CharSelectScreen::new(cc, test_your_might.progress()),
             test_your_might,
             dev_screenshot: dev::Screenshot::from_env(),
+            updater: UpdatePrompt::start(&cc.egui_ctx),
             height_fraction,
             fit: WindowFit::default(),
         };
@@ -194,6 +199,13 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let window = self.fit_window(ctx);
         match self.screen {
+            // An update offer (character select only) takes the keyboard
+            // while it's up.
+            Screen::CharSelect if self.updater.active() => {
+                if self.updater.handle_input(ctx) {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
             Screen::CharSelect => {
                 self.char_select.handle_input(ctx);
                 if self.char_select.confirmed {
@@ -229,6 +241,7 @@ impl eframe::App for App {
                 match self.screen {
                     Screen::CharSelect => {
                         self.char_select.draw(&mut screen_ui, ctx, screen_rect);
+                        self.updater.draw(&screen_ui, screen_rect);
                     }
                     Screen::TestYourMight => {
                         self.test_your_might.draw(&mut screen_ui, ctx, screen_rect);
@@ -291,6 +304,7 @@ fn main() -> eframe::Result<()> {
 
     // Command-line flags:
     //   --version (-v)     print the version and exit
+    //   --update           install the latest release, if newer, and exit
     //   --reset            delete the saved progress, then start fresh
     //   --height <frac>    window height as a fraction of the monitor's
     //                      height (default 0.5)
@@ -298,6 +312,9 @@ fn main() -> eframe::Result<()> {
     if std::env::args().skip(1).any(|a| matches!(a.as_str(), "--version" | "--v" | "-v" | "-V")) {
         println!("Test Your Might {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
+    }
+    if std::env::args().skip(1).any(|a| a == "--update") {
+        std::process::exit(update::run_cli());
     }
     let mut height_fraction = HEIGHT_FRACTION;
     let mut args = std::env::args().skip(1);
@@ -312,7 +329,7 @@ fn main() -> eframe::Result<()> {
                 Ok(None) => eprintln!("--reset: no saved progress to delete"),
                 Err(e) => eprintln!("--reset: couldn't delete saved progress: {e}"),
             },
-            other => eprintln!("ignoring unknown argument {other:?} (supported: --version, --reset, --height <frac>)"),
+            other => eprintln!("ignoring unknown argument {other:?} (supported: --version, --update, --reset, --height <frac>)"),
         }
     }
 

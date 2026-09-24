@@ -1,6 +1,6 @@
 [package]
 name = "test-your-might"
-version = "0.0.18"
+version = "0.0.19"
 edition = "2021"
 
 [dependencies]
@@ -12,9 +12,20 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 directories = "5"
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+minisign-verify = "0.2.5"
+self-replace = "1.5.0"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Console"] }
+
+# Self-update HTTPS (src/update.rs). Windows and macOS use the OS's own TLS
+# (SChannel / Security.framework), so certificates the OS trusts - e.g. a
+# company proxy's - work. Linux, only used for development, uses rustls.
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+ureq = { version = "2", default-features = false, features = ["native-tls", "json"] }
+
+[target.'cfg(not(any(windows, target_os = "macos")))'.dependencies]
+ureq = { version = "2", default-features = false, features = ["tls", "json"] }
 
 [profile.release]
 opt-level = "z"
@@ -25,3 +36,6 @@ panic = "abort"
 [[bin]]
 name = "test-your-might"
 path = "src/main.rs"
+
+[dev-dependencies]
+minisign = "0.9.1"

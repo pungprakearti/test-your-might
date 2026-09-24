@@ -1,12 +1,18 @@
-# Builds the Windows and macOS apps and publishes them as a GitHub Release
-# whenever a version tag (v*) is pushed, e.g.
-# `git tag v0.0.16 && git push origin v0.0.16`. Running it by hand
-# (workflow_dispatch) builds both without publishing, to check the builds.
+# Builds and tests the Windows and macOS apps on every push to main (and on
+# pull requests), including an end-to-end test of self-updating on both.
+# Pushing a version tag (v*) additionally signs the builds and publishes them
+# as a GitHub Release, e.g. `git tag v0.0.19 && git push origin v0.0.19`.
+#
+# Publishing needs the repository secret MINISIGN_SECRET_KEY: the contents of
+# the minisign secret key whose public half is keys/release-signing.pub (see
+# docs/releasing.md). The game refuses updates not signed with it.
 name: Release
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -34,8 +40,6 @@ jobs:
 
   macos:
     runs-on: macos-latest
-    env:
-      APP: Test Your Might.app
     steps:
       - uses: actions/checkout@v4
 
@@ -57,35 +61,11 @@ jobs:
             target/x86_64-apple-darwin/release/test-your-might
           lipo -info test-your-might
 
-      # A minimal .app bundle around the binary. It isn't signed or
-      # notarized (that needs a paid Apple developer account), so macOS asks
-      # the user to allow it on first launch - see README.
       - name: Bundle
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          mkdir -p "$APP/Contents/MacOS"
-          cp test-your-might "$APP/Contents/MacOS/"
-          cat > "$APP/Contents/Info.plist" <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>CFBundleName</key><string>Test Your Might</string>
-            <key>CFBundleDisplayName</key><string>Test Your Might</string>
-            <key>CFBundleIdentifier</key><string>com.pungprakearti.test-your-might</string>
-            <key>CFBundleExecutable</key><string>test-your-might</string>
-            <key>CFBundlePackageType</key><string>APPL</string>
-            <key>CFBundleShortVersionString</key><string>$version</string>
-            <key>CFBundleVersion</key><string>$version</string>
-            <key>LSMinimumSystemVersion</key><string>11.0</string>
-            <key>NSHighResolutionCapable</key><true/>
-          </dict>
-          </plist>
-          EOF
-          plutil -lint "$APP/Contents/Info.plist"
-          # Ad-hoc signature: required for arm64 binaries to run at all.
-          codesign --force --deep --sign - "$APP"
-          ditto -c -k --keepParent "$APP" test-your-might-macos.zip
+          tools/macos/bundle.sh test-your-might "$version" .
+          ditto -c -k --keepParent "Test Your Might.app" test-your-might-macos.zip
 
       - uses: actions/upload-artifact@v4
         with:
@@ -93,20 +73,63 @@ jobs:
           path: test-your-might-macos.zip
           if-no-files-found: error
 
+  # Installs a signed "newer" build over this one with the real --update code
+  # path, and checks bad releases are refused (tools/update-e2e.sh).
+  update-e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Self-update end-to-end test
+        shell: bash
+        run: tools/update-e2e.sh
+
   publish:
-    needs: [windows, macos]
+    needs: [windows, macos, update-e2e]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      # A tag that doesn't match the built version would make every copy of
+      # the game offer this "update" forever.
+      - name: Check tag matches Cargo.toml
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME doesn't match Cargo.toml version $version"
+            exit 1
+          fi
+
       - uses: actions/download-artifact@v4
+
+      - name: Sign
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then
+            echo "::error::the MINISIGN_SECRET_KEY secret isn't set (see docs/releasing.md)"
+            exit 1
+          fi
+          sudo apt-get install -y minisign
+          key="$RUNNER_TEMP/release-signing.key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          tools/sign-release.sh "$key" "${GITHUB_REF_NAME#v}" \
+            windows/test-your-might.exe macos/test-your-might-macos.zip
+          rm "$key"
 
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            --repo "${{ github.repository }}" \
-            windows/test-your-might.exe \
-            macos/test-your-might-macos.zip \
-            --title "${{ github.ref_name }}" \
+          gh release create "$GITHUB_REF_NAME" \
+            windows/test-your-might.exe windows/test-your-might.exe.minisig \
+            macos/test-your-might-macos.zip macos/test-your-might-macos.zip.minisig \
+            --title "$GITHUB_REF_NAME" \
             --generate-notes
