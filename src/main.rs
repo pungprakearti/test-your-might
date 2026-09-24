@@ -43,16 +43,67 @@ const RESIZE_RETRY_SECS: f64 = 1.0;
 const SCREEN_MIN: egui::Pos2 = egui::pos2(32.0, 151.0);
 const SCREEN_MAX: egui::Pos2 = egui::pos2(468.0, 442.0);
 
-// GitHub logo on the bottom-right of the cabinet's lower panel (x 17-482,
-// from y 597 in mk-cabinet.png), mirroring the coin plate on the left: the
-// plate starts 30px in from the panel's left edge at y 625, so the logo's
-// top is at y 625 and its right edge 30px in from the panel's right edge.
-// Clicking it opens the repo. assets/github-logo.png is
-// assets/GitHub_Invertocat_White.svg rendered white at 4x (160px) with
-// `cargo run --example render_svg -- <svg> <png> 160`, tinted when drawn.
-const GITHUB_LOGO: egui::Rect = egui::Rect::from_min_max(egui::pos2(413.0, 625.0), egui::pos2(453.0, 665.0));
-const GITHUB_LOGO_COLOR: egui::Color32 = egui::Color32::from_gray(150);
-const GITHUB_LOGO_HOVER_COLOR: egui::Color32 = egui::Color32::from_gray(215);
+// Clickable icons that open a web page, in a row on the bottom right of the
+// cabinet's lower panel (x 17-482, from y 597 in mk-cabinet.png), mirroring
+// the coin plate on the left: the plate starts 30px in from the panel's left
+// edge at y 625, so the row's top is at y 625 and its right edge 30px in
+// from the panel's right edge. Each icon is centered, at its own aspect
+// ratio, in a LINK_ICON_SIZE box; the boxes are 70px apart center to center,
+// like the plate's two coin slots (x 63-91 and 133-161).
+//
+// Each PNG is its SVG in assets/ rendered as a white silhouette at 4x (200px)
+// plus an 8px transparent margin, so edges aren't clipped when drawn:
+// `cargo run --example render_svg -- <svg> <png> 216 8`, which also prints
+// the drawing's aspect ratio. Tinted when drawn.
+struct LinkIcon {
+    id: &'static str,
+    png: &'static [u8],
+    // Left edge of the icon's box.
+    left: f32,
+    // Width / height of the drawing.
+    aspect: f32,
+    url: &'static str,
+}
+
+const LINK_ICONS: [LinkIcon; 2] = [
+    LinkIcon {
+        id: "hockey-puck",
+        png: include_bytes!("../assets/hockey-puck.png"),
+        left: 333.0,
+        aspect: 1.2858,
+        url: "https://www.biscuitsinthebasket.com",
+    },
+    LinkIcon {
+        id: "github-logo",
+        png: include_bytes!("../assets/github-logo.png"),
+        left: 403.0,
+        aspect: 1.0324,
+        url: update::REPO_URL,
+    },
+];
+const LINK_ICON_TOP: f32 = 625.0;
+const LINK_ICON_SIZE: f32 = 50.0;
+// The PNGs' margin, in design points (8px at 4x).
+const LINK_ICON_MARGIN: f32 = 2.0;
+const LINK_ICON_COLOR: egui::Color32 = egui::Color32::from_gray(75);
+const LINK_ICON_HOVER_COLOR: egui::Color32 = egui::Color32::from_gray(125);
+
+impl LinkIcon {
+    // The square the PNG (minus its margin) is drawn into.
+    fn box_rect(&self) -> egui::Rect {
+        egui::Rect::from_min_size(egui::pos2(self.left, LINK_ICON_TOP), egui::Vec2::splat(LINK_ICON_SIZE))
+    }
+
+    // The drawing itself, centered in the box: the clickable area.
+    fn drawing_rect(&self) -> egui::Rect {
+        let size = if self.aspect >= 1.0 {
+            egui::vec2(LINK_ICON_SIZE, LINK_ICON_SIZE / self.aspect)
+        } else {
+            egui::vec2(LINK_ICON_SIZE * self.aspect, LINK_ICON_SIZE)
+        };
+        egui::Rect::from_center_size(self.box_rect().center(), size)
+    }
+}
 
 #[derive(PartialEq)]
 enum Screen {
@@ -79,7 +130,8 @@ fn load_texture_with(
 
 struct App {
     bg_texture: Option<egui::TextureHandle>,
-    github_logo: Option<egui::TextureHandle>,
+    // LINK_ICONS' textures, in the same order.
+    link_icons: Vec<Option<egui::TextureHandle>>,
     screen: Screen,
     char_select: CharSelectScreen,
     test_your_might: TestYourMightScreen,
@@ -111,16 +163,21 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>, height_fraction: f32) -> Self {
         let bg_texture = load_texture(&cc.egui_ctx, "cabinet-bg", include_bytes!("../assets/mk-cabinet.png"));
         let test_your_might = TestYourMightScreen::new(cc);
-        // Drawn at a fraction of its size, so mipmapped to stay smooth.
-        let github_logo = load_texture_with(
-            &cc.egui_ctx,
-            "github-logo",
-            include_bytes!("../assets/github-logo.png"),
-            egui::TextureOptions { mipmap_mode: Some(egui::TextureFilter::Linear), ..egui::TextureOptions::LINEAR },
-        );
+        // Drawn at a fraction of their size, so mipmapped to stay smooth.
+        let link_icons = LINK_ICONS
+            .iter()
+            .map(|icon| {
+                load_texture_with(
+                    &cc.egui_ctx,
+                    icon.id,
+                    icon.png,
+                    egui::TextureOptions { mipmap_mode: Some(egui::TextureFilter::Linear), ..egui::TextureOptions::LINEAR },
+                )
+            })
+            .collect();
         let mut app = Self {
             bg_texture,
-            github_logo,
+            link_icons,
             screen: Screen::CharSelect,
             char_select: CharSelectScreen::new(cc, test_your_might.progress()),
             test_your_might,
@@ -300,32 +357,39 @@ impl eframe::App for App {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
 
-                let logo_rect = GITHUB_LOGO.translate(window.min.to_vec2());
-                let logo_resp = ui.interact(logo_rect, egui::Id::new("github-logo"), egui::Sense::click());
-                let logo_color = if logo_resp.hovered() {
-                    ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
-                    GITHUB_LOGO_HOVER_COLOR
-                } else {
-                    GITHUB_LOGO_COLOR
-                };
-                if let Some(tex) = &self.github_logo {
-                    ui.painter().image(
-                        tex.id(),
-                        logo_rect,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        logo_color,
-                    );
-                }
-                if logo_resp.clicked() {
-                    ctx.open_url(egui::OpenUrl::new_tab(update::REPO_URL));
+                let mut icon_rects = Vec::with_capacity(LINK_ICONS.len());
+                for (icon, tex) in LINK_ICONS.iter().zip(&self.link_icons) {
+                    let hit_rect = icon.drawing_rect().translate(window.min.to_vec2());
+                    let resp = ui.interact(hit_rect, egui::Id::new(icon.id), egui::Sense::click());
+                    let color = if resp.hovered() {
+                        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                        LINK_ICON_HOVER_COLOR
+                    } else {
+                        LINK_ICON_COLOR
+                    };
+                    if let Some(tex) = tex {
+                        ui.painter().image(
+                            tex.id(),
+                            icon.box_rect().translate(window.min.to_vec2()).expand(LINK_ICON_MARGIN),
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            color,
+                        );
+                    }
+                    if resp.clicked() {
+                        ctx.open_url(egui::OpenUrl::new_tab(icon.url));
+                    }
+                    icon_rects.push(hit_rect);
                 }
 
                 // Drag the whole (undecorated) window from anywhere on the
                 // cabinet art outside the screen, the close button, and the
-                // GitHub logo.
+                // link icons.
                 if ui.input(|i| i.pointer.primary_pressed()) {
                     if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
-                        if !screen_rect.contains(pos) && !close_rect.contains(pos) && !logo_rect.contains(pos) {
+                        if !screen_rect.contains(pos)
+                            && !close_rect.contains(pos)
+                            && !icon_rects.iter().any(|r| r.contains(pos))
+                        {
                             ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                         }
                     }

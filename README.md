@@ -118,8 +118,9 @@ instead of overwriting it.
 test-your-might.exe --version      # also -v; prints e.g. "Test Your Might 0.0.17"
 ```
 
-The GitHub logo on the bottom right of the cabinet opens this repo in your
-browser.
+On the bottom right of the cabinet, the hockey puck opens
+[biscuitsinthebasket.com](https://www.biscuitsinthebasket.com) and the GitHub
+logo opens this repo in your browser.
 
 ## Updates
 

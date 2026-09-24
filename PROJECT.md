@@ -25,14 +25,19 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   old fixed-points window "blow up"; the closest Windows repro was the old
   build at 175% scale being 875x1225, taller than a 1080p monitor.
   Windows/X11 test tooling: `docs/dev-environment.md`.
-- GitHub logo (user-requested): 40x40 at (413, 625) in cabinet coords, on
-  the lower panel's bottom right, mirroring the coin plate's inset (plate
-  starts 30px in from the panel's left edge at y 625). Gray 150, 215 on
-  hover with a pointing-hand cursor; click opens the repo
-  (`update::REPO_URL`) in the browser; excluded from window dragging.
-  `assets/github-logo.png` = `assets/GitHub_Invertocat_White.svg` rendered
-  white at 160px (`cargo run --example render_svg -- <svg> <png> 160`),
-  mipmapped and tinted at draw time.
+- Link icons (user-requested; `LINK_ICONS` in `src/main.rs`): a row on the
+  lower panel's bottom right - hockey puck (opens
+  https://www.biscuitsinthebasket.com) then GitHub logo (opens the repo,
+  `update::REPO_URL`). Each is centered at its own aspect ratio in a 50x50
+  box (puck 50x38.9, logo 50x48.4); boxes at x 333 and 403, top y 625,
+  70px apart center to center like the coin plate's two slots, the row's
+  right edge 30px in from the panel edge mirroring the plate's left inset.
+  Gray 75, 125 on hover (user's picks) with a pointing-hand cursor; only
+  the drawing is clickable, and those areas are excluded from window
+  dragging. PNGs: each SVG rendered as a white silhouette at 200px + 8px
+  transparent margin (`cargo run --example render_svg -- <svg> <png> 216
+  8`, which fits the drawing, not the viewBox, and prints its aspect;
+  without the margin, edges got clipped), mipmapped, tinted when drawn.
 - The typing test only renders inside the cabinet's "screen" rect:
   `(32, 151)` to `(467, 441)` inclusive = 436x291, same size as the screen
   art so it draws 1:1 (measured from the PNG, see git history of

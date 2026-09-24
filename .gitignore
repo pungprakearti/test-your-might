@@ -10,3 +10,6 @@ CLAUDE.md
 
 # Signing secret keys - never tracked (the public key is keys/*.pub)
 *.key
+
+# Windows "downloaded from the internet" markers (copied in via WSL)
+*:Zone.Identifier
