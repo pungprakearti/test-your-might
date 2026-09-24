@@ -23,9 +23,11 @@ for Windows or macOS. Neither is code-signed, so the OS warns the first time:
   "Open Anyway". Or, in Terminal:
   `xattr -dr com.apple.quarantine "/Applications/Test Your Might.app"`.
 
+After that, the game updates itself (see [Updates](#updates)).
+
 <p>
   <img src="docs/screenshots/character-select.png" alt="Character select screen inside the arcade cabinet" width="320">
-  <img src="docs/screenshots/test-your-might.png" alt="Test Your Might round: both fighters broke their wood slabs" width="320">
+  <img src="docs/screenshots/test-your-might.png" alt="Test Your Might round: both fighters broke their wood slabs, unlocking Johnny Cage" width="320">
 </p>
 
 ## How to play
@@ -45,13 +47,16 @@ for Windows or macOS. Neither is code-signed, so the OS warns the first time:
 | --- | --- | --- |
 | Character select | Arrow keys | Move the selector |
 | Character select | Enter | Pick the highlighted fighter |
+| Update offer | Enter / Esc | Install the new version / keep playing (see [Updates](#updates)) |
 | Test Your Might | Letters / Space | Type the words (Space moves to the next word) |
 | Test Your Might | Backspace | Delete a letter; keeps going back into earlier words |
-| Test Your Might | Enter (or R) | After a round: start the next round |
+| Test Your Might | Enter | After a round: start the next round |
 | Test Your Might | Esc | Back to character select (a round in progress is discarded) |
 
 Drag the window by the cabinet art around the screen; close it with the X in
-the top-right corner.
+the top-right corner. On the bottom right of the cabinet, the hockey puck
+opens [biscuitsinthebasket.com](https://www.biscuitsinthebasket.com) and the
+GitHub logo opens this repo in your browser.
 
 ### Scoring and progression
 
@@ -115,12 +120,8 @@ instead of overwriting it.
 ## Version
 
 ```
-test-your-might.exe --version      # also -v; prints e.g. "Test Your Might 0.0.17"
+test-your-might.exe --version      # also -v; prints e.g. "Test Your Might 0.0.22"
 ```
-
-On the bottom right of the cabinet, the hockey puck opens
-[biscuitsinthebasket.com](https://www.biscuitsinthebasket.com) and the GitHub
-logo opens this repo in your browser.
 
 ## Updates
 
@@ -137,7 +138,9 @@ To update from a terminal instead:
 test-your-might.exe --update
 ```
 
-This works from v0.0.20 on; older versions need one manual download.
+Updating works from v0.0.22, the first release with it; older versions need
+one manual download. If you're offline or GitHub can't be reached, the game
+just skips the check.
 
 ## Window size
 
@@ -176,15 +179,16 @@ an end-to-end self-update test on both. Pushing a version tag also signs the
 builds and publishes them as a GitHub Release:
 
 ```
-git tag v0.0.20
-git push origin v0.0.20
+git tag v<version in Cargo.toml>
+git push origin v<version in Cargo.toml>
 ```
 
 Signing needs the `MINISIGN_SECRET_KEY` repository secret; see
 [`docs/releasing.md`](docs/releasing.md).
 
 Release builds run without a console window of their own on Windows; when
-launched from a terminal they print to it (e.g. `--version`, `--reset`).
+launched from a terminal they print to it (e.g. `--version`, `--update`,
+`--reset`).
 
 ### Development notes
 
@@ -204,7 +208,12 @@ launched from a terminal they print to it (e.g. `--version`, `--reset`).
 - [image](https://crates.io/crates/image) for decoding the embedded PNG art
 - [rand](https://crates.io/crates/rand) for word and opponent picks
 - [serde](https://serde.rs/) + [directories](https://crates.io/crates/directories)
-  for saved progress
+  for saved progress, [chrono](https://crates.io/crates/chrono) for the
+  days-played unlock
+- [ureq](https://crates.io/crates/ureq),
+  [minisign-verify](https://crates.io/crates/minisign-verify) and
+  [self_replace](https://crates.io/crates/self-replace) for signed
+  self-updates
 
 ## Disclaimer
 

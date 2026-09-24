@@ -8,15 +8,15 @@ version tag is pushed:
 2. Tag that commit with the same version and push the tag:
 
    ```
-   git tag v0.0.20
-   git push origin v0.0.20
+   git tag v0.0.23
+   git push origin v0.0.23
    ```
 
 The workflow builds and tests Windows and macOS, runs the self-update
 end-to-end test on both, checks the tag matches `Cargo.toml`, signs the
 `.exe` and the macOS `.zip`, and publishes them with their `.minisig`
-signatures. Copies of the game from v0.0.20 on offer the new release at
-startup (see `src/update.rs`).
+signatures. Copies of the game from v0.0.22 (the first signed release) on
+offer the new release at startup (see `src/update.rs`).
 
 ## The signing key
 

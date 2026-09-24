@@ -176,7 +176,8 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   replaces the exe (self_replace), macOS the whole .app. HTTPS: OS TLS on
   Windows/macOS (company proxy certs work), rustls on Linux (dev only).
   Relaunch keeps only `--height`. E2E: `tools/update-e2e.sh` (CI on
-  Windows+macOS). First release with it: 0.0.20 (0.0.19 was never released).
+  Windows+macOS). First release with it: v0.0.22 (published and signature-verified;
+  0.0.19-0.0.21 were never released).
 - Releases: pushing a `v*` tag runs `.github/workflows/release.yml`:
   Windows `.exe` (windows-latest) and a universal (arm64+x86_64) macOS
   `.app`, ad-hoc signed, zipped as `test-your-might-macos.zip`

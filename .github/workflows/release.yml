@@ -1,7 +1,8 @@
 # Builds and tests the Windows and macOS apps on every push to main (and on
 # pull requests), including an end-to-end test of self-updating on both.
 # Pushing a version tag (v*) additionally signs the builds and publishes them
-# as a GitHub Release, e.g. `git tag v0.0.20 && git push origin v0.0.20`.
+# as a GitHub Release, e.g. `git tag v1.2.3 && git push origin v1.2.3` for
+# Cargo.toml version 1.2.3 (the publish job checks they match).
 #
 # Publishing needs the repository secret MINISIGN_SECRET_KEY: the contents of
 # the minisign secret key whose public half is keys/release-signing.pub (see
