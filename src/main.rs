@@ -3,7 +3,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 // Test Your Might - arcade cabinet app scaffold.
-// Window is fixed at 500x700 to match mk-cabinet.png. Each screen (character
+// Window is fixed at 500x700 to match mk-cabinet.png (kept that way across
+// monitor scale changes, see fit_window). Each screen (character
 // select, then Test Your Might with the typing test on its floor) renders only
 // inside the cabinet's "screen" rect of that image: (32,151) -> (467,441)
 // inclusive, 436x291. See char_select.rs, test_your_might.rs, and
@@ -24,6 +25,7 @@ use test_your_might::TestYourMightScreen;
 
 const WINDOW_W: f32 = 500.0;
 const WINDOW_H: f32 = 700.0;
+const WINDOW_SIZE: egui::Vec2 = egui::vec2(WINDOW_W, WINDOW_H);
 
 // Screen rect measured from mk-cabinet.png (flood-filled bounding box of the
 // blue-gray panel). The panel's last pixel column/row is 467/441, so the
@@ -52,6 +54,9 @@ struct App {
     char_select: CharSelectScreen,
     test_your_might: TestYourMightScreen,
     dev_screenshot: dev::Screenshot,
+    // Window size (physical pixels) we last asked the OS to correct, so a
+    // refused resize isn't re-requested every frame.
+    resize_requested_for: Option<egui::Vec2>,
 }
 
 impl App {
@@ -64,7 +69,10 @@ impl App {
             char_select: CharSelectScreen::new(cc, test_your_might.progress()),
             test_your_might,
             dev_screenshot: dev::Screenshot::from_env(),
+            resize_requested_for: None,
         };
+        // fit_window owns the zoom factor.
+        cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         if let Some(character) = dev::select_character() {
             app.char_select.dev_select(character);
         }
@@ -81,10 +89,43 @@ impl App {
         }
         app
     }
+
+    // Moving the window to a monitor with a different scale factor can leave
+    // it at a size that no longer matches 500x700 points (the OS/winit resize
+    // on a DPI change isn't reliable - seen with mixed-scale monitors on
+    // Windows, and reproducible on X11). Everything here is laid out in fixed
+    // points, so that used to stretch the cabinet art over the wrong-sized
+    // window while the screen and close button stayed put. Ask for the
+    // design size back, and until the window has it (or if the OS refuses),
+    // zoom so the whole design fits the window as it is. Returns where the
+    // 500x700 design sits in the window, in points.
+    fn fit_window(&mut self, ctx: &egui::Context) -> egui::Rect {
+        let native = ctx.native_pixels_per_point().unwrap_or(1.0);
+        let window_px = ctx.screen_rect().size() * ctx.pixels_per_point();
+        let design_px = WINDOW_SIZE * native;
+        let off = (window_px - design_px).abs().max_elem() > 1.5;
+        if off && self.resize_requested_for != Some(window_px) {
+            // InnerSize is in points at the zoom the command is applied with.
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(WINDOW_SIZE / ctx.zoom_factor()));
+            self.resize_requested_for = Some(window_px);
+        } else if !off {
+            self.resize_requested_for = None;
+        }
+        // Takes effect next frame; this frame keeps the current zoom.
+        let fit = (window_px.x / design_px.x).min(window_px.y / design_px.y);
+        if (fit - ctx.zoom_factor()).abs() > 0.001 {
+            ctx.set_zoom_factor(fit);
+        }
+        // Centered, snapped to whole pixels so the art isn't resampled.
+        let ppp = ctx.pixels_per_point();
+        let min = (ctx.screen_rect().center() - WINDOW_SIZE / 2.0) * ppp;
+        egui::Rect::from_min_size(egui::pos2(min.x.round(), min.y.round()) / ppp, WINDOW_SIZE)
+    }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let window = self.fit_window(ctx);
         match self.screen {
             Screen::CharSelect => {
                 self.char_select.handle_input(ctx);
@@ -106,17 +147,16 @@ impl eframe::App for App {
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
             .show(ctx, |ui| {
-                let rect = ui.max_rect();
                 if let Some(tex) = &self.bg_texture {
                     ui.painter().image(
                         tex.id(),
-                        rect,
+                        window,
                         egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                         egui::Color32::WHITE,
                     );
                 }
 
-                let screen_rect = egui::Rect::from_min_max(SCREEN_MIN, SCREEN_MAX);
+                let screen_rect = egui::Rect::from_min_max(SCREEN_MIN, SCREEN_MAX).translate(window.min.to_vec2());
                 let mut screen_ui = ui.new_child(egui::UiBuilder::new().max_rect(screen_rect));
                 screen_ui.set_clip_rect(screen_rect);
                 match self.screen {
@@ -129,7 +169,7 @@ impl eframe::App for App {
                 }
 
                 let close_rect = egui::Rect::from_min_size(
-                    egui::pos2(WINDOW_W - 30.0, 6.0),
+                    window.min + egui::vec2(WINDOW_W - 30.0, 6.0),
                     egui::vec2(24.0, 24.0),
                 );
                 let close_resp = ui.interact(

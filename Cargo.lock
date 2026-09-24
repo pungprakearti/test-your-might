@@ -2115,7 +2115,7 @@ dependencies = [
 
 [[package]]
 name = "test-your-might"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "chrono",
  "directories",

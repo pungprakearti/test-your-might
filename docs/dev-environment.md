@@ -50,6 +50,31 @@ or just open a new terminal tab.
     `TYM_DEV_DELAY` seconds (default 1.0) and quits. The cabinet screen is
     the (32,151)-(467,441) crop of it.
 
+## X11 runs: monitor scale changes and real key presses
+
+Running under X11 (XWayland) instead of Wayland lets you change the scale
+factor live and inject keys, which WSLg's Wayland doesn't allow.
+
+- winit's X11 backend needs `libxkbcommon-x11`, which isn't installed. Fetch it
+  without root into a scratch dir (`<dir>` below):
+
+  ```
+  cd <dir> && apt-get download libxkbcommon-x11-0 libxcb-xkb1
+  for f in *.deb; do dpkg-deb -x $f .; done
+  ln -s libxkbcommon-x11.so.0 usr/lib/x86_64-linux-gnu/libxkbcommon-x11.so
+  ```
+
+- Then run with `DISPLAY=:0 WAYLAND_DISPLAY= LD_LIBRARY_PATH=<dir>/usr/lib/x86_64-linux-gnu`.
+- `python3 tools/xsettings.py 144 96 2.5` (start it before the app) acts as
+  an XSETTINGS manager: Xft/DPI 144 (1.5x), then 96 (1x) after 2.5s. winit
+  sees that as a `ScaleFactorChanged`, the same path as dragging the window to
+  a monitor with a different scale on Windows. Check the window with
+  `xwininfo -name "Test Your Might"` (should be 750x1050 at 1.5x, 500x700 at
+  1x) and grab a frame with `TYM_DEV_SCREENSHOT`.
+- `python3 tools/xkey.py r Return` presses keys (XTest) in the focused
+  window, e.g. to check keys on the results panel after
+  `TYM_DEV_TYPE_WORDS=10` and a 30s wait.
+
 ## Windows packaging (not done yet)
 
 Still need one of:

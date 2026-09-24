@@ -202,7 +202,7 @@ impl TestYourMightScreen {
             self.round.result = Some(run);
             self.round.ended_at = Some(now);
         } else if self.round.result.is_some()
-            && ctx.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::R))
+            && ctx.input(|i| i.key_pressed(egui::Key::Enter))
         {
             self.start_round(now);
             return Action::Stay;
