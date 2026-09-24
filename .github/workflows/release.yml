@@ -1,10 +1,13 @@
-# Builds the Windows executable and publishes it as a GitHub Release whenever
-# a version tag (v*) is pushed, e.g. `git tag v0.0.13 && git push origin v0.0.13`.
+# Builds the Windows and macOS apps and publishes them as a GitHub Release
+# whenever a version tag (v*) is pushed, e.g.
+# `git tag v0.0.16 && git push origin v0.0.16`. Running it by hand
+# (workflow_dispatch) builds both without publishing, to check the builds.
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -23,12 +26,87 @@ jobs:
       - name: Build
         run: cargo build --release
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: target/release/test-your-might.exe
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-latest
+    env:
+      APP: Test Your Might.app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Test
+        run: cargo test --release
+
+      # One universal binary, so the same download runs on Apple Silicon and
+      # Intel Macs.
+      - name: Build
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          lipo -create -output test-your-might \
+            target/aarch64-apple-darwin/release/test-your-might \
+            target/x86_64-apple-darwin/release/test-your-might
+          lipo -info test-your-might
+
+      # A minimal .app bundle around the binary. It isn't signed or
+      # notarized (that needs a paid Apple developer account), so macOS asks
+      # the user to allow it on first launch - see README.
+      - name: Bundle
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          mkdir -p "$APP/Contents/MacOS"
+          cp test-your-might "$APP/Contents/MacOS/"
+          cat > "$APP/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>Test Your Might</string>
+            <key>CFBundleDisplayName</key><string>Test Your Might</string>
+            <key>CFBundleIdentifier</key><string>com.pungprakearti.test-your-might</string>
+            <key>CFBundleExecutable</key><string>test-your-might</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>$version</string>
+            <key>CFBundleVersion</key><string>$version</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          EOF
+          plutil -lint "$APP/Contents/Info.plist"
+          # Ad-hoc signature: required for arm64 binaries to run at all.
+          codesign --force --deep --sign - "$APP"
+          ditto -c -k --keepParent "$APP" test-your-might-macos.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: test-your-might-macos.zip
+          if-no-files-found: error
+
+  publish:
+    needs: [windows, macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+
       - name: Publish release
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" \
-            target/release/test-your-might.exe \
+            --repo "${{ github.repository }}" \
+            windows/test-your-might.exe \
+            macos/test-your-might-macos.zip \
             --title "${{ github.ref_name }}" \
             --generate-notes

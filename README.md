@@ -11,9 +11,17 @@ install.
 
 A hobby project, built for fun.
 
-**[Download the latest Windows build](https://github.com/pungprakearti/test-your-might/releases/latest)**
-(`test-your-might.exe`, just run it). It isn't code-signed, so the first
-time Windows SmartScreen may warn: choose "More info", then "Run anyway".
+**[Download the latest release](https://github.com/pungprakearti/test-your-might/releases/latest)**
+for Windows or macOS. Neither is code-signed, so the OS warns the first time:
+
+- **Windows:** `test-your-might.exe`, just run it. If SmartScreen warns,
+  choose "More info", then "Run anyway".
+- **macOS** (Apple Silicon or Intel, macOS 11+): unzip
+  `test-your-might-macos.zip` and move `Test Your Might.app` to
+  Applications. The first launch is blocked ("Apple could not verify...");
+  open System Settings > Privacy & Security, scroll down, and click
+  "Open Anyway". Or, in Terminal:
+  `xattr -dr com.apple.quarantine "/Applications/Test Your Might.app"`.
 
 <p>
   <img src="docs/screenshots/character-select.png" alt="Character select screen inside the arcade cabinet" width="320">
@@ -86,6 +94,7 @@ Your current material and every finished round (WPM, accuracy, goal, result,
 time) are saved to `progress.json`:
 
 - Windows: `%APPDATA%\test-your-might\data\progress.json`
+- macOS: `~/Library/Application Support/test-your-might/progress.json`
 - Linux: `~/.local/share/test-your-might/progress.json`
 
 It's written once at the end of each round, so a round you quit midway isn't
@@ -133,14 +142,18 @@ Windows desktop through WSLg).
 
 ### Releases
 
-Pushing a version tag builds the Windows `.exe` on GitHub Actions
+Pushing a version tag builds the Windows `.exe` and a universal macOS
+`.app` (zipped) on GitHub Actions
 ([`.github/workflows/release.yml`](.github/workflows/release.yml)) and
-publishes it as a GitHub Release:
+publishes both as a GitHub Release, only if both builds pass:
 
 ```
-git tag v0.0.13
-git push origin v0.0.13
+git tag v0.0.16
+git push origin v0.0.16
 ```
+
+Running the workflow by hand from the Actions tab builds both without
+publishing anything.
 
 Release builds run without a console window on Windows, so flags like
 `--reset` work silently there.

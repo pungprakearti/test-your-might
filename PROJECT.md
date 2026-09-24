@@ -144,11 +144,15 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
 ## Not yet built
 
 - The `*_placement.png` files are reference art only and aren't drawn.
-- Real-Windows verification of the release `.exe` (always-on-top, dragging,
-  save location). Releases: pushing a `v*` tag runs
-  `.github/workflows/release.yml` on windows-latest (test, build, publish
-  `test-your-might.exe` to a GitHub Release). Release builds use
-  `windows_subsystem = "windows"` (no console). App icon not set yet.
+- Releases: pushing a `v*` tag runs `.github/workflows/release.yml`:
+  Windows `.exe` (windows-latest) and a universal (arm64+x86_64) macOS
+  `.app`, ad-hoc signed, zipped as `test-your-might-macos.zip`
+  (macos-latest); a publish job creates the GitHub Release only when both
+  pass. `workflow_dispatch` builds without publishing. Release builds use
+  `windows_subsystem = "windows"` (no console). Not code-signed/notarized
+  (needs paid certs), so SmartScreen/Gatekeeper warn on first launch.
+- Nobody has run the macOS build on a real Mac yet (CI only builds it).
+  App icon not set yet on either platform.
 
 ## Open questions
 
