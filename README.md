@@ -7,12 +7,15 @@ steel, ruby and finally diamond, each one demanding a little more of you.
 
 It runs as a small, borderless, always-on-top window shaped like the arcade
 cabinet: a single native binary with all the art built in and nothing to
-install. The same game also runs in a web browser (see
-[The web version](#the-web-version)).
+install. The same game also runs in a web browser, at
+https://test-your-might.vercel.app (see [The web version](#the-web-version)).
 
 A hobby project, built for fun.
 
-**[Download the latest release](https://github.com/pungprakearti/test-your-might/releases/latest)**
+**[Play it in your browser](https://test-your-might.vercel.app)**, nothing
+to install (needs a physical keyboard; progress is saved in that browser).
+
+Or **[download the latest release](https://github.com/pungprakearti/test-your-might/releases/latest)**
 for Windows or macOS. Neither is code-signed, so the OS warns the first time:
 
 - **Windows:** `test-your-might.exe`, just run it. If SmartScreen warns,
@@ -191,7 +194,7 @@ cargo install --locked trunk
 trunk serve --release        # then open http://127.0.0.1:8080
 ```
 
-It's deployed to Vercel from CI. How it differs from the desktop build and
+It's deployed to https://test-your-might.vercel.app from CI. How it differs from the desktop build and
 how deployment is set up: [`docs/web.md`](docs/web.md).
 
 ### Releases
