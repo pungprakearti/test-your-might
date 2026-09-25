@@ -197,6 +197,10 @@ jobs:
           fi
           prod=
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then prod=--prod; fi
-          url=$(npx --yes vercel@latest deploy --prebuilt $prod --token "$VERCEL_TOKEN")
-          echo "Deployed the web version: $url" >> "$GITHUB_STEP_SUMMARY"
-          echo "$url"
+          # The CLI prints the deployment's URL, or a JSON report with it
+          # first when it thinks an AI agent is running it; take the URL
+          # either way.
+          out=$(npx --yes vercel@60 deploy --prebuilt $prod --token "$VERCEL_TOKEN")
+          url=$(printf '%s\n' "$out" | grep -o 'https://[^" ]*\.vercel\.app' | head -1)
+          echo "Deployed the web version: ${url:-$out}" >> "$GITHUB_STEP_SUMMARY"
+          echo "${url:-$out}"
