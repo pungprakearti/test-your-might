@@ -236,8 +236,9 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   zoomed to the page, standing on its bottom edge; no Close/drag/update),
   `audio/web.rs` (Web Audio), `progress.rs` (`localStorage`), `dev.rs`
   (URL query hooks). Deployed to Vercel by the `web`/`deploy-web` CI jobs
-  (preview on PRs, production on tags) once the `VERCEL_*` secrets exist -
-  not set up yet. E2E-checked in headless Chrome (render, keys, a full
+  (preview on PRs, production on tags). Vercel project + project-scoped CI
+  token made 2026-09-25 and a manual preview deploy verified; the three
+  `VERCEL_*` GitHub secrets still need adding by the user. E2E-checked in headless Chrome (render, keys, a full
   round, localStorage save, phone/wide layouts); sound not heard yet.
   Details: `docs/web.md`.
 - Nobody has run the macOS build on a real Mac yet (CI only builds it).

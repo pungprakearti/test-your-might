@@ -88,7 +88,15 @@ CI does the deploying (`.github/workflows/release.yml`):
   (the URL is in the run's summary) and **production** for `v*` tags, so
   the site updates together with the desktop release.
 
-One-time setup:
+Current setup (2026-09-25): Vercel project `test-your-might`
+(`prj_n2DsLjKBzoya3PXFhoEN1N4GDRCo`) in the team "pungprakearti's projects"
+(`team_q0Euaub96LYgIpWP0FmGJySf`), with no Git connection. CI deploys with
+the token "github-actions test-your-might", scoped to that project only and
+set to never expire; revoke it in Vercel's account settings > Tokens if it
+leaks, and put a new one in the `VERCEL_TOKEN` secret. Preview deployments
+are behind Vercel's login (Deployment Protection); production is public.
+
+One-time setup, for a new project:
 
 1. Create a Vercel project for the repo (Framework Preset: Other). Don't
    connect Vercel's own Git integration, or it will try to build on every
