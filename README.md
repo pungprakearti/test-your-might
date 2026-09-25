@@ -7,7 +7,8 @@ steel, ruby and finally diamond, each one demanding a little more of you.
 
 It runs as a small, borderless, always-on-top window shaped like the arcade
 cabinet: a single native binary with all the art built in and nothing to
-install.
+install. The same game also runs in a web browser (see
+[The web version](#the-web-version)).
 
 A hobby project, built for fun.
 
@@ -103,6 +104,9 @@ time) are saved to `progress.json`:
 - macOS: `~/Library/Application Support/test-your-might/progress.json`
 - Linux: `~/.local/share/test-your-might/progress.json`
 
+In the web version it's the same data, kept in that browser's
+`localStorage`.
+
 It's written once at the end of each round, so a round you quit midway isn't
 saved.
 
@@ -177,13 +181,27 @@ to hear it, also route ALSA to WSLg's PulseAudio:
 Development so far has been on Linux under WSL (the window shows up on the
 Windows desktop through WSLg).
 
+### The web version
+
+The same code compiles to WebAssembly and runs on a web page:
+
+```
+rustup target add wasm32-unknown-unknown
+cargo install --locked trunk
+trunk serve --release        # then open http://127.0.0.1:8080
+```
+
+It's deployed to Vercel from CI. How it differs from the desktop build and
+how deployment is set up: [`docs/web.md`](docs/web.md).
+
 ### Releases
 
 Every push to `main` builds and tests the Windows `.exe` and a universal
 macOS `.app` on GitHub Actions
 ([`.github/workflows/release.yml`](.github/workflows/release.yml)), including
-an end-to-end self-update test on both. Pushing a version tag also signs the
-builds and publishes them as a GitHub Release:
+an end-to-end self-update test on both, and builds the web version. Pushing a
+version tag also signs the desktop builds and publishes them as a GitHub
+Release, and deploys the web version:
 
 ```
 git tag v<version in Cargo.toml>
@@ -217,7 +235,11 @@ launched from a terminal they print to it (e.g. `--version`, `--update`,
 - [serde](https://serde.rs/) + [directories](https://crates.io/crates/directories)
   for saved progress, [chrono](https://crates.io/crates/chrono) for the
   days-played unlock
-- [rodio](https://crates.io/crates/rodio) for sound
+- [rodio](https://crates.io/crates/rodio) for sound (and the browser's Web
+  Audio on the web)
+- [Trunk](https://trunkrs.dev) and
+  [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen) for the web
+  version
 - [ureq](https://crates.io/crates/ureq),
   [minisign-verify](https://crates.io/crates/minisign-verify) and
   [self_replace](https://crates.io/crates/self-replace) for signed

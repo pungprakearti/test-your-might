@@ -9,6 +9,21 @@
 // floor) renders only inside the cabinet's "screen" rect of that image:
 // (32,151) -> (467,441) inclusive, 436x291. See char_select.rs,
 // test_your_might.rs, and typing_test.rs for the individual screens.
+//
+// The same game runs on the web (wasm32, see docs/web.md): in a browser tab
+// the cabinet is zoomed to fit the page instead of sizing a window, and
+// there's no Close button, window dragging, or self-updating.
+
+// A warning for the log: stderr on the desktop, the browser's console on the
+// web (where stderr goes nowhere).
+macro_rules! warn {
+    ($($arg:tt)*) => {{
+        #[cfg(not(target_arch = "wasm32"))]
+        eprintln!($($arg)*);
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::warn_1(&format!($($arg)*).into());
+    }};
+}
 
 mod audio;
 mod char_select;
@@ -17,7 +32,9 @@ mod fighter;
 mod progress;
 mod test_your_might;
 mod typing_test;
+#[cfg(not(target_arch = "wasm32"))]
 mod update;
+#[cfg(not(target_arch = "wasm32"))]
 mod update_prompt;
 
 use eframe::egui;
@@ -26,16 +43,25 @@ use std::time::Duration;
 use audio::{Audio, Sound};
 use char_select::CharSelectScreen;
 use test_your_might::TestYourMightScreen;
+#[cfg(not(target_arch = "wasm32"))]
 use update_prompt::UpdatePrompt;
+
+pub const REPO_URL: &str = "https://github.com/pungprakearti/test-your-might";
 
 const WINDOW_W: f32 = 500.0;
 const WINDOW_H: f32 = 700.0;
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(WINDOW_W, WINDOW_H);
 // Window height as a fraction of the monitor's height (see fit_window).
+#[cfg(not(target_arch = "wasm32"))]
 const HEIGHT_FRACTION: f32 = 0.5;
+// Room left above and beside the cabinet on a web page, in CSS pixels.
+#[cfg(target_arch = "wasm32")]
+const PAGE_MARGIN: f32 = 16.0;
 // How long the window must sit still on a monitor before it's resized for it.
+#[cfg(not(target_arch = "wasm32"))]
 const SETTLE_SECS: f64 = 0.4;
 // How often to re-ask for the right window size while it's still wrong.
+#[cfg(not(target_arch = "wasm32"))]
 const RESIZE_RETRY_SECS: f64 = 1.0;
 
 // Screen rect measured from mk-cabinet.png (flood-filled bounding box of the
@@ -80,14 +106,18 @@ const LINK_ICONS: [LinkIcon; 2] = [
         png: include_bytes!("../assets/github-logo.png"),
         left: 403.0,
         aspect: 1.0324,
-        url: update::REPO_URL,
+        url: REPO_URL,
     },
 ];
 // The round Mute and Close buttons, side by side at the top right, over the
 // corner of the marquee: dark discs with a white ring and icon so they stand
-// out against the art, with a tooltip saying what they do.
+// out against the art, with a tooltip saying what they do. A web page can't
+// close its tab, so there Mute takes Close's place in the corner.
 const CLOSE_CENTER: egui::Pos2 = egui::pos2(480.0, 20.0);
+#[cfg(not(target_arch = "wasm32"))]
 const MUTE_CENTER: egui::Pos2 = egui::pos2(446.0, 20.0);
+#[cfg(target_arch = "wasm32")]
+const MUTE_CENTER: egui::Pos2 = CLOSE_CENTER;
 const BUTTON_RADIUS: f32 = 14.0;
 // Soft drop shadow under each button: SHADOW_STEPS translucent black discs,
 // growing to SHADOW_SPREAD past the button, nudged down by SHADOW_OFFSET.
@@ -97,6 +127,7 @@ const SHADOW_STEP_ALPHA: u8 = 22;
 const SHADOW_OFFSET: egui::Vec2 = egui::vec2(0.0, 2.0);
 const BUTTON_FILL: egui::Color32 = egui::Color32::from_black_alpha(200);
 const BUTTON_HOVER_FILL: egui::Color32 = egui::Color32::from_gray(70);
+#[cfg(not(target_arch = "wasm32"))]
 const CLOSE_HOVER_FILL: egui::Color32 = egui::Color32::from_rgb(200, 40, 40);
 const BUTTON_INK: egui::Color32 = egui::Color32::WHITE;
 const MUTED_MARK: egui::Color32 = egui::Color32::from_rgb(240, 80, 80);
@@ -158,6 +189,7 @@ fn round_button(
     resp
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn draw_close_icon(painter: &egui::Painter, c: egui::Pos2) {
     let stroke = egui::Stroke::new(2.5f32, BUTTON_INK);
     let d = 5.5;
@@ -222,13 +254,17 @@ struct App {
     char_select: CharSelectScreen,
     test_your_might: TestYourMightScreen,
     dev_screenshot: dev::Screenshot,
+    #[cfg(not(target_arch = "wasm32"))]
     updater: UpdatePrompt,
     audio: Audio,
+    #[cfg(not(target_arch = "wasm32"))]
     height_fraction: f32,
+    #[cfg(not(target_arch = "wasm32"))]
     fit: WindowFit,
 }
 
 // fit_window's state between frames. Sizes are physical pixels.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Default)]
 struct WindowFit {
     // Size the window should be, from the monitor it last settled on.
@@ -247,7 +283,7 @@ struct WindowFit {
 }
 
 impl App {
-    fn new(cc: &eframe::CreationContext<'_>, height_fraction: f32) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, #[cfg(not(target_arch = "wasm32"))] height_fraction: f32) -> Self {
         let bg_texture = load_texture(&cc.egui_ctx, "cabinet-bg", include_bytes!("../assets/mk-cabinet.png"));
         let test_your_might = TestYourMightScreen::new(cc);
         // Drawn at a fraction of their size, so mipmapped to stay smooth.
@@ -269,12 +305,15 @@ impl App {
             char_select: CharSelectScreen::new(cc, test_your_might.progress()),
             test_your_might,
             dev_screenshot: dev::Screenshot::from_env(),
+            #[cfg(not(target_arch = "wasm32"))]
             updater: UpdatePrompt::start(&cc.egui_ctx),
             audio: Audio::open(cc.storage.and_then(|s| eframe::get_value(s, MUTED_KEY)).unwrap_or(false)),
+            #[cfg(not(target_arch = "wasm32"))]
             height_fraction,
+            #[cfg(not(target_arch = "wasm32"))]
             fit: WindowFit::default(),
         };
-        // fit_window owns the zoom factor.
+        // fit_window / fit_page owns the zoom factor.
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         if let Some(character) = dev::select_character() {
             app.char_select.dev_select(character);
@@ -308,6 +347,7 @@ impl App {
     // mid-drag or on a one-off odd reading (and still works on Wayland,
     // where the window position isn't known). Returns where the design sits
     // in the window, in points.
+    #[cfg(not(target_arch = "wasm32"))]
     fn fit_window(&mut self, ctx: &egui::Context) -> egui::Rect {
         let now = ctx.input(|i| i.time);
         let ppp = ctx.pixels_per_point();
@@ -370,16 +410,41 @@ impl App {
         let min = (ctx.screen_rect().center() - WINDOW_SIZE / 2.0) * ppp;
         egui::Rect::from_min_size(egui::pos2(min.x.round(), min.y.round()) / ppp, WINDOW_SIZE)
     }
+
+    // The web page's version of fit_window: zooms so the cabinet fills as
+    // much of the page as it can at its own proportions, PAGE_MARGIN in from
+    // the top and sides. The art ends where the desktop window does, cut off
+    // across the coin door, so it stands on the page's bottom edge: the
+    // cabinet reads as carrying on below it rather than as chopped off. The
+    // page's size is the browser's business, so it just follows it. Returns
+    // where the design sits on the page, in points.
+    #[cfg(target_arch = "wasm32")]
+    fn fit_page(&mut self, ctx: &egui::Context) -> egui::Rect {
+        let native = ctx.native_pixels_per_point().unwrap_or(1.0);
+        let room_px = ctx.screen_rect().size() * ctx.pixels_per_point() - egui::vec2(2.0, 1.0) * PAGE_MARGIN * native;
+        let zoom = ((room_px.x / WINDOW_W).min(room_px.y / WINDOW_H) / native).max(0.1);
+        if (zoom - ctx.zoom_factor()).abs() > 0.0001 {
+            ctx.set_zoom_factor(zoom);
+        }
+        let ppp = ctx.pixels_per_point();
+        let page = ctx.screen_rect();
+        let min = egui::pos2(page.center().x - WINDOW_W / 2.0, page.max.y - WINDOW_H) * ppp;
+        egui::Rect::from_min_size(egui::pos2(min.x.round(), min.y.round()) / ppp, WINDOW_SIZE)
+    }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(not(target_arch = "wasm32"))]
         let window = self.fit_window(ctx);
+        #[cfg(target_arch = "wasm32")]
+        let window = self.fit_page(ctx);
         // Silent while another window has focus. (Unknown counts as focused.)
         self.audio.set_focused(ctx.input(|i| i.viewport().focused).unwrap_or(true));
         match self.screen {
             // An update offer (character select only) takes the keyboard
             // while it's up.
+            #[cfg(not(target_arch = "wasm32"))]
             Screen::CharSelect if self.updater.active() => {
                 if self.updater.handle_input(ctx) {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -422,6 +487,7 @@ impl eframe::App for App {
                 match self.screen {
                     Screen::CharSelect => {
                         self.char_select.draw(&mut screen_ui, ctx, screen_rect);
+                        #[cfg(not(target_arch = "wasm32"))]
                         self.updater.draw(&screen_ui, screen_rect);
                     }
                     Screen::TestYourMight => {
@@ -441,6 +507,7 @@ impl eframe::App for App {
                 if mute_resp.clicked() {
                     self.audio.set_muted(!muted);
                 }
+                #[cfg(not(target_arch = "wasm32"))]
                 let close_resp = round_button(
                     ui,
                     "close-button",
@@ -449,10 +516,10 @@ impl eframe::App for App {
                     CLOSE_HOVER_FILL,
                     draw_close_icon,
                 );
+                #[cfg(not(target_arch = "wasm32"))]
                 if close_resp.clicked() {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
-                let button_rects = [mute_resp.rect, close_resp.rect];
 
                 let mut icon_rects = Vec::with_capacity(LINK_ICONS.len());
                 for (icon, tex) in LINK_ICONS.iter().zip(&self.link_icons) {
@@ -481,7 +548,9 @@ impl eframe::App for App {
                 // Drag the whole (undecorated) window from anywhere on the
                 // cabinet art outside the screen, the buttons, and the link
                 // icons.
+                #[cfg(not(target_arch = "wasm32"))]
                 if ui.input(|i| i.pointer.primary_pressed()) {
+                    let button_rects = [mute_resp.rect, close_resp.rect];
                     if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
                         if !screen_rect.contains(pos)
                             && !button_rects.iter().any(|r| r.contains(pos))
@@ -498,6 +567,12 @@ impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, MUTED_KEY, &self.audio.muted());
     }
+
+    // The page around the cabinet (index.html uses the same color).
+    #[cfg(target_arch = "wasm32")]
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        egui::Rgba::from(PAGE_COLOR).to_array()
+    }
 }
 
 // Release builds on Windows are GUI apps with no console of their own, so
@@ -513,6 +588,7 @@ fn attach_parent_console() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result<()> {
     #[cfg(windows)]
     attach_parent_console();
@@ -565,4 +641,42 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(move |cc| Ok(Box::new(App::new(cc, height_fraction)))),
     )
+}
+
+// The web page's background, around the cabinet: index.html's body color.
+#[cfg(target_arch = "wasm32")]
+const PAGE_COLOR: egui::Color32 = egui::Color32::from_rgb(11, 11, 14);
+
+// On the web, `main` runs when the page loads the game (see index.html): it
+// starts the game on the page's canvas and takes down the loading message.
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    use wasm_bindgen::JsCast;
+
+    wasm_bindgen_futures::spawn_local(async {
+        let document = web_sys::window().and_then(|w| w.document()).expect("the game runs in a web page");
+        let canvas = document
+            .get_element_by_id("game")
+            .and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+            .expect("index.html has a <canvas id=\"game\">");
+        let result = eframe::WebRunner::new()
+            .start(canvas.clone(), eframe::WebOptions::default(), Box::new(|cc| Ok(Box::new(App::new(cc)))))
+            .await;
+        let loading = document.get_element_by_id("loading");
+        match result {
+            Ok(()) => {
+                if let Some(loading) = loading {
+                    loading.remove();
+                }
+                // Keys only reach the game while its canvas has focus.
+                let _ = canvas.focus();
+            }
+            Err(e) => {
+                if let Some(loading) = loading {
+                    loading.set_text_content(Some("The game couldn't start in this browser."));
+                }
+                warn!("the game couldn't start: {e:?}");
+            }
+        }
+    });
 }

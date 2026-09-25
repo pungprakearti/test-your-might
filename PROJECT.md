@@ -28,7 +28,7 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
 - Link icons (user-requested; `LINK_ICONS` in `src/main.rs`): a row on the
   lower panel's bottom right - hockey puck (opens
   https://www.biscuitsinthebasket.com) then GitHub logo (opens the repo,
-  `update::REPO_URL`). Each is centered at its own aspect ratio in a 50x50
+  `REPO_URL` in `src/main.rs`). Each is centered at its own aspect ratio in a 50x50
   box (puck 50x38.9, logo 50x48.4); boxes at x 333 and 403, top y 625,
   70px apart center to center like the coin plate's two slots, the row's
   right edge 30px in from the panel edge mirroring the plate's left inset.
@@ -230,6 +230,16 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
   quarantined the v0.0.22 exe ("Windows cannot access the specified
   device, path, or file"); a re-download ran fine. Authenticode signing
   (e.g. Microsoft Trusted Signing, ~$10/mo) is the proper fix if it recurs.
+- Web version (branch `web-version`, 2026-09-25, not merged yet): same
+  crate built for wasm32 with Trunk, `index.html` + `Trunk.toml` at the
+  root, `#[cfg(target_arch = "wasm32")]` splits in `main.rs` (`fit_page`:
+  zoomed to the page, standing on its bottom edge; no Close/drag/update),
+  `audio/web.rs` (Web Audio), `progress.rs` (`localStorage`), `dev.rs`
+  (URL query hooks). Deployed to Vercel by the `web`/`deploy-web` CI jobs
+  (preview on PRs, production on tags) once the `VERCEL_*` secrets exist -
+  not set up yet. E2E-checked in headless Chrome (render, keys, a full
+  round, localStorage save, phone/wide layouts); sound not heard yet.
+  Details: `docs/web.md`.
 - Nobody has run the macOS build on a real Mac yet (CI only builds it).
   App icon not set yet on either platform.
 
@@ -245,3 +255,4 @@ Current version: see `Cargo.toml` (`version`). Bump this on every commit.
 
 - Stack + how to run: `README.md`
 - Dev environment / toolchain quirks (WSL, PATH): `docs/dev-environment.md`
+- Web version (build, code split, Vercel deploy): `docs/web.md`

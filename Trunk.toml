@@ -1,0 +1,10 @@
+# Trunk builds the web version (see docs/web.md and index.html).
+
+[build]
+target = "index.html"
+dist = "dist"
+
+[tools]
+# Trunk's default wasm-opt predates some WebAssembly features current Rust
+# emits by default (see the feature flags in index.html).
+wasm_opt = "version_133"
