@@ -1,10 +1,12 @@
-// Player progression, saved to disk: which material the player is currently
-// trying to break, and the history of finished runs. The target WPM (the red
+// Player progression, saved to disk (localStorage on the web): which
+// material the player is currently trying to break, and the history of
+// finished runs. The target WPM (the red
 // bar on the gauge) comes from the average of the last few runs, reduced by a
 // per-material percentage so easier materials are more forgiving.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
 use crate::fighter::{Character, Unlock};
@@ -137,48 +139,35 @@ impl Progress {
     // Loads saved progress, or starts fresh if there is none (or it can't be
     // read).
     pub fn load() -> Progress {
-        let Some(path) = save_path() else {
-            return Progress::default();
-        };
-        match std::fs::read_to_string(&path) {
-            Ok(json) => serde_json::from_str(&json).unwrap_or_else(|e| {
-                // Move it aside rather than let the next save overwrite it, so
-                // the history can still be recovered by hand.
-                let backup = path.with_extension(format!("json.unreadable-{}", unix_now()));
-                eprintln!("progress: can't parse {} ({e}); moving it to {}", path.display(), backup.display());
-                if let Err(e) = std::fs::rename(&path, &backup) {
-                    eprintln!("progress: couldn't move it aside: {e}");
-                }
-                Progress::default()
-            }),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Progress::default(),
+        let json = match store::read() {
+            Ok(Some(json)) => json,
+            Ok(None) => return Progress::default(),
             Err(e) => {
-                eprintln!("progress: can't read {}: {e}", path.display());
-                Progress::default()
+                warn!("progress: {e}");
+                return Progress::default();
             }
-        }
+        };
+        serde_json::from_str(&json).unwrap_or_else(|e| {
+            // Move it aside rather than let the next save overwrite it, so
+            // the history can still be recovered by hand.
+            match store::set_aside(unix_now()) {
+                Ok(backup) => warn!("progress: can't parse {} ({e}); moved it to {backup}", store::location()),
+                Err(aside) => warn!("progress: can't parse {} ({e}), and couldn't move it aside: {aside}", store::location()),
+            }
+            Progress::default()
+        })
     }
 
     // Permanently deletes the save file (for `--reset`). Returns the path it
     // deleted, or None if there was no save to delete.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn delete_save() -> std::io::Result<Option<PathBuf>> {
-        let Some(path) = save_path() else {
-            return Ok(None);
-        };
-        match std::fs::remove_file(&path) {
-            Ok(()) => Ok(Some(path)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e),
-        }
+        store::delete()
     }
 
     pub fn save(&self) {
-        let Some(path) = save_path() else {
-            eprintln!("progress: no data directory available, not saving");
-            return;
-        };
-        if let Err(e) = write_atomically(&path, &serde_json::to_string_pretty(self).expect("progress serializes")) {
-            eprintln!("progress: can't save {}: {e}", path.display());
+        if let Err(e) = store::write(&serde_json::to_string_pretty(self).expect("progress serializes")) {
+            warn!("progress: {e}");
         }
     }
 }
@@ -189,27 +178,109 @@ fn local_date(unix_secs: u64) -> Option<chrono::NaiveDate> {
 }
 
 fn unix_now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default()
+    web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default()
 }
 
-// progress.json in the OS data directory, or in $TYM_DATA_DIR when set (dev
-// runs use this to keep test data away from real progress).
-fn save_path() -> Option<PathBuf> {
-    let dir = match std::env::var_os("TYM_DATA_DIR") {
-        Some(dir) => PathBuf::from(dir),
-        None => directories::ProjectDirs::from("", "", "test-your-might")?.data_dir().to_path_buf(),
-    };
-    Some(dir.join("progress.json"))
-}
+// Where progress is saved: a file on the desktop, localStorage on the web.
+// Errors are messages for the log.
+#[cfg(not(target_arch = "wasm32"))]
+mod store {
+    use std::path::{Path, PathBuf};
 
-// Writes via a temp file + rename so a crash mid-write can't corrupt the save.
-fn write_atomically(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
+    // progress.json in the OS data directory, or in $TYM_DATA_DIR when set
+    // (dev runs use this to keep test data away from real progress).
+    fn path() -> Option<PathBuf> {
+        let dir = match std::env::var_os("TYM_DATA_DIR") {
+            Some(dir) => PathBuf::from(dir),
+            None => directories::ProjectDirs::from("", "", "test-your-might")?.data_dir().to_path_buf(),
+        };
+        Some(dir.join("progress.json"))
     }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, contents)?;
-    std::fs::rename(&tmp, path)
+
+    pub fn location() -> String {
+        path().map_or_else(|| "progress.json".into(), |p| p.display().to_string())
+    }
+
+    pub fn read() -> Result<Option<String>, String> {
+        let Some(path) = path() else { return Ok(None) };
+        match std::fs::read_to_string(&path) {
+            Ok(json) => Ok(Some(json)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("can't read {}: {e}", path.display())),
+        }
+    }
+
+    pub fn write(json: &str) -> Result<(), String> {
+        let path = path().ok_or("no data directory available, not saving")?;
+        write_atomically(&path, json).map_err(|e| format!("can't save {}: {e}", path.display()))
+    }
+
+    // Renames the save to progress.json.unreadable-<unix_time>; returns the
+    // new path.
+    pub fn set_aside(unix_time: u64) -> Result<String, String> {
+        let path = path().ok_or("no data directory available")?;
+        let backup = path.with_extension(format!("json.unreadable-{unix_time}"));
+        std::fs::rename(&path, &backup).map_err(|e| e.to_string())?;
+        Ok(backup.display().to_string())
+    }
+
+    pub fn delete() -> std::io::Result<Option<PathBuf>> {
+        let Some(path) = path() else {
+            return Ok(None);
+        };
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(Some(path)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    // Writes via a temp file + rename so a crash mid-write can't corrupt the
+    // save.
+    fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, contents)?;
+        std::fs::rename(&tmp, path)
+    }
+}
+
+// The same JSON as the desktop's progress.json, in this browser's
+// localStorage under KEY. Private browsing or blocked site data can leave
+// it unavailable; then nothing is saved.
+#[cfg(target_arch = "wasm32")]
+mod store {
+    const KEY: &str = "test-your-might.progress";
+
+    fn storage() -> Result<web_sys::Storage, String> {
+        web_sys::window()
+            .and_then(|w| w.local_storage().ok().flatten())
+            .ok_or_else(|| "this browser isn't letting the page save anything".into())
+    }
+
+    pub fn location() -> String {
+        format!("localStorage {KEY:?}")
+    }
+
+    pub fn read() -> Result<Option<String>, String> {
+        storage()?.get_item(KEY).map_err(|e| format!("can't read {}: {e:?}", location()))
+    }
+
+    pub fn write(json: &str) -> Result<(), String> {
+        storage()?.set_item(KEY, json).map_err(|e| format!("can't save {}: {e:?}", location()))
+    }
+
+    // Moves the save to KEY.unreadable-<unix_time>; returns the new key.
+    pub fn set_aside(unix_time: u64) -> Result<String, String> {
+        let storage = storage()?;
+        let backup = format!("{KEY}.unreadable-{unix_time}");
+        let json = storage.get_item(KEY).ok().flatten().unwrap_or_default();
+        storage.set_item(&backup, &json).map_err(|e| format!("{e:?}"))?;
+        storage.remove_item(KEY).map_err(|e| format!("{e:?}"))?;
+        Ok(format!("localStorage {backup:?}"))
+    }
 }
 
 #[cfg(test)]

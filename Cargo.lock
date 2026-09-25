@@ -346,7 +346,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -1000,8 +1002,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -3031,13 +3035,15 @@ dependencies = [
 
 [[package]]
 name = "test-your-might"
-version = "0.0.23"
+version = "0.0.24"
 dependencies = [
  "chrono",
  "directories",
  "eframe",
  "egui",
+ "getrandom 0.2.17",
  "image",
+ "js-sys",
  "minisign",
  "minisign-verify",
  "rand",
@@ -3047,6 +3053,10 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
  "windows-sys 0.59.0",
 ]
 

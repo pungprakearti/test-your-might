@@ -3,7 +3,8 @@
 // screen onto the 436x83 concrete floor strip, so the layout is compact.
 
 use eframe::egui;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 const TEST_DURATION: Duration = Duration::from_secs(30);
 // Letters typed past the end of a word are kept and shown (in red), up to

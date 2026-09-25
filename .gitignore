@@ -13,3 +13,7 @@ CLAUDE.md
 
 # Windows "downloaded from the internet" markers (copied in via WSL)
 *:Zone.Identifier
+
+# Web build output (trunk build)
+/dist
+/.vercel

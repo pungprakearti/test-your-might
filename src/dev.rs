@@ -13,31 +13,46 @@
 //                                   start
 //   TYM_DEV_SCREENSHOT=<path.png>  save a screenshot after TYM_DEV_DELAY
 //                                   seconds (default 1.0), then quit
+//                                   (desktop only)
+//
+// On the web, where there's no environment, the same names are read from the
+// page's URL query instead, e.g. index.html?TYM_DEV_START=liu_kang.
 
 use eframe::egui;
 
 use crate::fighter::Character;
 
+#[cfg(not(target_arch = "wasm32"))]
+fn var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn var(name: &str) -> Option<String> {
+    let search = web_sys::window()?.location().search().ok()?;
+    web_sys::UrlSearchParams::new_with_str(&search).ok()?.get(name)
+}
+
 pub fn start_character() -> Option<Character> {
-    let name = std::env::var("TYM_DEV_START").ok()?;
+    let name = var("TYM_DEV_START")?;
     let found = Character::ALL.into_iter().find(|c| c.sprite_prefix() == name);
     if found.is_none() {
-        eprintln!("TYM_DEV_START: unknown character {name:?}");
+        warn!("TYM_DEV_START: unknown character {name:?}");
     }
     found
 }
 
 pub fn select_character() -> Option<Character> {
-    let name = std::env::var("TYM_DEV_SELECT").ok()?;
+    let name = var("TYM_DEV_SELECT")?;
     Character::ALL.into_iter().find(|c| c.sprite_prefix() == name)
 }
 
 pub fn typed_text() -> Option<String> {
-    std::env::var("TYM_DEV_TYPE").ok()
+    var("TYM_DEV_TYPE")
 }
 
 pub fn typed_words() -> Option<usize> {
-    std::env::var("TYM_DEV_TYPE_WORDS").ok()?.parse().ok()
+    var("TYM_DEV_TYPE_WORDS")?.parse().ok()
 }
 
 pub struct Screenshot {

@@ -1,12 +1,17 @@
-# Builds and tests the Windows and macOS apps on every push to main (and on
-# pull requests), including an end-to-end test of self-updating on both.
-# Pushing a version tag (v*) additionally signs the builds and publishes them
-# as a GitHub Release, e.g. `git tag v1.2.3 && git push origin v1.2.3` for
-# Cargo.toml version 1.2.3 (the publish job checks they match).
+# Builds and tests the Windows and macOS apps and the web version on every
+# push to main (and on pull requests), including an end-to-end test of
+# self-updating on both desktops.
+# Pushing a version tag (v*) additionally signs the desktop builds and
+# publishes them as a GitHub Release, e.g. `git tag v1.2.3 && git push origin
+# v1.2.3` for Cargo.toml version 1.2.3 (the publish job checks they match),
+# and deploys the web version to production on Vercel. Pull requests get a
+# Vercel preview deployment.
 #
 # Publishing needs the repository secret MINISIGN_SECRET_KEY: the contents of
 # the minisign secret key whose public half is keys/release-signing.pub (see
 # docs/releasing.md). The game refuses updates not signed with it.
+# Deploying the web version needs VERCEL_TOKEN, VERCEL_ORG_ID and
+# VERCEL_PROJECT_ID (see docs/web.md); without them it's skipped.
 name: Release
 
 on:
@@ -74,6 +79,39 @@ jobs:
           path: test-your-might-macos.zip
           if-no-files-found: error
 
+  # The web version (docs/web.md): lint and build it for wasm32, packaged for
+  # Vercel.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+
+      # The desktop jobs' tests don't compile the web-only code.
+      - name: Lint
+        run: cargo clippy --release --target wasm32-unknown-unknown -- -D warnings
+
+      - name: Build
+        run: |
+          trunk build --release
+          tools/web/vercel-output.sh dist
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: .vercel/output
+          include-hidden-files: true
+          if-no-files-found: error
+
   # Installs a signed "newer" build over this one with the real --update code
   # path, and checks bad releases are refused (tools/update-e2e.sh).
   update-e2e:
@@ -134,3 +172,31 @@ jobs:
             macos/test-your-might-macos.zip macos/test-your-might-macos.zip.minisig \
             --title "$GITHUB_REF_NAME" \
             --generate-notes
+
+  # Deploys the web version once everything has passed: a preview for pull
+  # requests, production for version tags.
+  deploy-web:
+    needs: [web, windows, macos, update-e2e]
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: web
+          path: .vercel/output
+
+      - name: Deploy
+        run: |
+          if [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "::warning::Vercel secrets aren't set (see docs/web.md); not deploying the web version"
+            exit 0
+          fi
+          prod=
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then prod=--prod; fi
+          url=$(npx --yes vercel@latest deploy --prebuilt $prod --token "$VERCEL_TOKEN")
+          echo "Deployed the web version: $url" >> "$GITHUB_STEP_SUMMARY"
+          echo "$url"

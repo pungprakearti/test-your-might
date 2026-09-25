@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<!-- The web version of the game (see docs/web.md). `trunk serve` / `trunk
+     build --release` compile the crate to WebAssembly and put this page,
+     with the game wired in, in dist/. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Test Your Might</title>
+  <meta name="description" content="A typing test in a Mortal Kombat arcade cabinet. Type fast enough to break the slab.">
+  <!-- wasm-opt gets the WebAssembly features Rust targets by default spelled
+       out: the release profile's `strip` removes the section that would tell
+       it. -->
+  <link data-trunk rel="rust" data-wasm-opt="z"
+        data-wasm-opt-params="--enable-bulk-memory --enable-bulk-memory-opt --enable-call-indirect-overlong --enable-multivalue --enable-mutable-globals --enable-nontrapping-float-to-int --enable-reference-types --enable-sign-ext">
+  <link data-trunk rel="icon" href="web/favicon.png">
+  <style>
+    /* The page color is PAGE_COLOR in src/main.rs; the loading text is the
+       game's title yellow. */
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #0b0b0e;
+    }
+    #game {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    #loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 16px;
+      text-align: center;
+      color: #f0c828;
+      font: 16px monospace;
+      letter-spacing: 0.15em;
+    }
+    /* Top right: the cabinet stands on the page's bottom edge, so there's
+       free space above it on narrow pages and beside it on wide ones. */
+    #desktop-link {
+      position: fixed;
+      right: 12px;
+      top: 10px;
+      color: #6b6b73;
+      font: 12px monospace;
+      text-decoration: none;
+    }
+    #desktop-link:hover {
+      color: #b0b0b8;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="loading">LOADING...<noscript> The game needs JavaScript.</noscript></div>
+  <a id="desktop-link" href="https://github.com/pungprakearti/test-your-might/releases/latest" target="_blank" rel="noopener">Get the desktop app</a>
+</body>
+</html>

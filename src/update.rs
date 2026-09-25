@@ -34,7 +34,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-pub const REPO_URL: &str = "https://github.com/pungprakearti/test-your-might";
 const PUBLIC_KEY_FILE: &str = include_str!("../keys/release-signing.pub");
 // Far above any real release (~5 MB), so a bad server can't fill the disk.
 const MAX_DOWNLOAD_BYTES: usize = 100 * 1024 * 1024;
@@ -124,7 +123,7 @@ pub fn check() -> Result<Option<Release>, String> {
     let Some(asset) = asset_name() else {
         return Ok(None);
     };
-    let repo = env::var("TYM_UPDATE_URL").unwrap_or_else(|_| REPO_URL.to_owned());
+    let repo = env::var("TYM_UPDATE_URL").unwrap_or_else(|_| crate::REPO_URL.to_owned());
     let repo = repo.trim_end_matches('/');
     // <repo>/releases/latest redirects to <repo>/releases/tag/<latest tag>.
     let latest = agent(0)?
