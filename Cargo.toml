@@ -1,6 +1,6 @@
 [package]
 name = "test-your-might"
-version = "0.0.25"
+version = "0.0.26"
 edition = "2021"
 
 # The game builds for the desktop (Windows, macOS, and Linux for development)

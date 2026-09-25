@@ -3,7 +3,8 @@
 The game also runs in a browser, so people can try it without downloading
 anything. It's the same crate compiled to WebAssembly (`wasm32-unknown-unknown`)
 by [Trunk](https://trunkrs.dev), drawn by eframe on a `<canvas>` in
-[`index.html`](../index.html), and hosted on Vercel as plain static files.
+[`index.html`](../index.html), and hosted on Vercel as plain static files
+at https://test-your-might.vercel.app (live since v0.0.25).
 
 ## Running it locally
 
