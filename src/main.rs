@@ -624,12 +624,20 @@ fn main() -> eframe::Result<()> {
         }
     }
 
+    let icon = {
+        let png = include_bytes!("../assets/cs-scorpion.png");
+        let img = image::load_from_memory(png).expect("icon png").into_rgba8();
+        let (w, h) = img.dimensions();
+        egui::IconData { rgba: img.into_raw(), width: w, height: h }
+    };
+
     let viewport = egui::ViewportBuilder::default()
         .with_inner_size([WINDOW_W, WINDOW_H])
         .with_resizable(false)
         .with_decorations(false)
         .with_always_on_top()
-        .with_transparent(false);
+        .with_transparent(false)
+        .with_icon(std::sync::Arc::new(icon));
 
     let options = eframe::NativeOptions {
         viewport,
