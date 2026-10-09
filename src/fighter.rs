@@ -29,8 +29,8 @@ pub enum Unlock {
     Default,
     // Break this material for the first time.
     Break(Material),
-    // Finish a round on this many different days (need not be in a row).
-    PlayedDays(usize),
+    // Win this many rounds at diamond level.
+    DiamondWins(usize),
 }
 
 impl Character {
@@ -64,7 +64,7 @@ impl Character {
             Character::Raiden => Unlock::Break(Material::Steel),
             Character::SonyaBlade => Unlock::Break(Material::Ruby),
             Character::SubZero => Unlock::Break(Material::Diamond),
-            Character::Scorpion => Unlock::PlayedDays(10),
+            Character::Scorpion => Unlock::DiamondWins(3),
         }
     }
 

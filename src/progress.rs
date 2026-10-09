@@ -5,7 +5,6 @@
 // per-material percentage so easier materials are more forgiving.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
@@ -123,16 +122,16 @@ impl Progress {
         self.runs.iter().any(|r| r.material == material && r.passed)
     }
 
-    // How many different local calendar days have a finished round.
-    pub fn days_played(&self) -> usize {
-        self.runs.iter().filter_map(|r| local_date(r.finished_at)).collect::<HashSet<_>>().len()
+    // How many diamond-level rounds were won (passed).
+    pub fn diamond_wins(&self) -> usize {
+        self.runs.iter().filter(|r| r.material == Material::Diamond && r.passed).count()
     }
 
     pub fn is_unlocked(&self, character: Character) -> bool {
         match character.unlock() {
             Unlock::Default => true,
             Unlock::Break(material) => self.has_broken(material),
-            Unlock::PlayedDays(days) => self.days_played() >= days,
+            Unlock::DiamondWins(n) => self.diamond_wins() >= n,
         }
     }
 
@@ -170,11 +169,6 @@ impl Progress {
             warn!("progress: {e}");
         }
     }
-}
-
-fn local_date(unix_secs: u64) -> Option<chrono::NaiveDate> {
-    use chrono::TimeZone;
-    chrono::Local.timestamp_opt(i64::try_from(unix_secs).ok()?, 0).single().map(|t| t.date_naive())
 }
 
 fn unix_now() -> u64 {
@@ -386,21 +380,15 @@ mod tests {
     }
 
     #[test]
-    fn scorpion_needs_ten_different_days() {
-        const DAY: u64 = 24 * 60 * 60;
-        let start = 1_790_000_000;
+    fn scorpion_needs_three_diamond_wins() {
         let mut p = Progress::default();
-        for day in 0..9 {
-            // Several rounds on the same moment only count once.
-            p.runs.push(run(Material::Wood, false, start + day * DAY));
-            p.runs.push(run(Material::Wood, false, start + day * DAY));
-        }
-        // Days don't need to be in a row.
-        p.runs.push(run(Material::Wood, false, start + 30 * DAY));
-        assert_eq!(p.days_played(), 9 + 1);
-        assert!(p.is_unlocked(Character::Scorpion));
-        p.runs.pop();
+        p.runs.push(run(Material::Diamond, true, 0));
+        p.runs.push(run(Material::Diamond, true, 0));
         assert!(!p.is_unlocked(Character::Scorpion));
+        p.runs.push(run(Material::Diamond, false, 0));
+        assert!(!p.is_unlocked(Character::Scorpion), "failed diamond rounds don't count");
+        p.runs.push(run(Material::Diamond, true, 0));
+        assert!(p.is_unlocked(Character::Scorpion));
     }
 
     #[test]

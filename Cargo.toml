@@ -1,6 +1,6 @@
 [package]
 name = "test-your-might"
-version = "0.0.26"
+version = "0.0.27"
 edition = "2021"
 
 # The game builds for the desktop (Windows, macOS, and Linux for development)
@@ -14,7 +14,6 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 # std::time on the desktop; the browser's clock on the web, where
 # std::time::Instant panics.
 web-time = "1"
@@ -29,9 +28,8 @@ rodio = { version = "0.22.2", default-features = false, features = ["playback", 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # rodio only decodes the MP3s here; the browser's Web Audio plays them.
 rodio = { version = "0.22.2", default-features = false, features = ["mp3"] }
-# Browser randomness and time zone for rand and chrono.
+# Browser randomness for rand.
 getrandom = { version = "0.2", features = ["js"] }
-chrono = { version = "0.4.45", default-features = false, features = ["clock", "wasmbind"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"

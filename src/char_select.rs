@@ -85,10 +85,10 @@ pub struct CharSelectScreen {
     // Per-CHAR_CELLS-index unlocked-portrait overlay (cs-<name>.png). Liu
     // Kang has no entry (his portrait is already baked into cs-background.png).
     cs_portrait_textures: [Option<egui::TextureHandle>; 7],
-    // Per-CHAR_CELLS-index unlock state, and the days played (for
+    // Per-CHAR_CELLS-index unlock state, and diamond wins (for
     // Scorpion's hint), refreshed from saved progress.
     unlocked: [bool; 7],
-    days_played: usize,
+    diamond_wins: usize,
     selected: usize,
     // egui time Enter confirmed the selected fighter.
     confirmed_at: Option<f64>,
@@ -116,7 +116,7 @@ impl CharSelectScreen {
             cs_sel2_texture,
             cs_portrait_textures,
             unlocked: [false; 7],
-            days_played: 0,
+            diamond_wins: 0,
             selected: 0,
             confirmed_at: None,
         };
@@ -135,7 +135,7 @@ impl CharSelectScreen {
 
     fn refresh_unlocks(&mut self, progress: &Progress) {
         self.unlocked = std::array::from_fn(|i| progress.is_unlocked(CHAR_CELLS[i].character));
-        self.days_played = progress.days_played();
+        self.diamond_wins = progress.diamond_wins();
     }
 
     fn hint(&self) -> (String, egui::Color32) {
@@ -147,7 +147,7 @@ impl CharSelectScreen {
         let how = match character.unlock() {
             Unlock::Default => unreachable!("default fighters are always unlocked"),
             Unlock::Break(material) => format!("break {} to unlock", material.label()),
-            Unlock::PlayedDays(days) => format!("play {days} different days ({}/{days})", self.days_played.min(days)),
+            Unlock::DiamondWins(n) => format!("win {n} diamond rounds ({}/{n})", self.diamond_wins.min(n)),
         };
         (format!("{name}  -  {how}"), HINT_LOCKED)
     }
